@@ -53,6 +53,85 @@ func NewClient() *Client {
 	}
 }
 
+// ── Auth methods ───────────────────────────────────────────────────────────────
+
+// InitLogin creates a PKCE login intent on the control plane.
+// codeChallenge is the S256 hash of the code verifier.
+// state is a random anti-CSRF token.
+// redirectURI is the local callback server URL.
+func (c *Client) InitLogin(codeChallenge, state, redirectURI string) (CliInitResponse, error) {
+	payload := map[string]any{
+		"code_challenge":        codeChallenge,
+		"code_challenge_method": "S256",
+		"state":                 state,
+		"redirect_uri":          redirectURI,
+	}
+	var resp CliInitResponse
+	if err := c.postJSON(c.controlURL("/api/v1/auth/cli/init"), payload, "", &resp); err != nil {
+		return CliInitResponse{}, err
+	}
+	return resp, nil
+}
+
+// ExchangeCliToken exchanges a PKCE authorization code for access + refresh tokens.
+func (c *Client) ExchangeCliToken(code, codeVerifier, redirectURI string) (CliTokenResponse, error) {
+	payload := map[string]any{
+		"code":          code,
+		"code_verifier": codeVerifier,
+		"redirect_uri":  redirectURI,
+	}
+	var resp CliTokenResponse
+	if err := c.postJSON(c.controlURL("/api/v1/auth/cli/token"), payload, "", &resp); err != nil {
+		return CliTokenResponse{}, err
+	}
+	return resp, nil
+}
+
+// ── Tunnel methods ─────────────────────────────────────────────────────────────
+
+func (c *Client) CreateTunnel(subdomain string, localPort int, protocol string, accessToken string) (CreateTunnelResponse, error) {
+	if localPort <= 0 || localPort > 65535 {
+		return CreateTunnelResponse{}, fmt.Errorf("invalid local port")
+	}
+
+	payload := map[string]any{
+		"local_port": localPort,
+		"protocol":   protocol,
+	}
+	// Only include requested_subdomain when the user explicitly provided one.
+	if subdomain != "" {
+		payload["requested_subdomain"] = subdomain
+	}
+
+	var resp CreateTunnelResponse
+	if err := c.postJSON(c.controlURL("/api/v1/tunnels"), payload, accessToken, &resp); err != nil {
+		return CreateTunnelResponse{}, err
+	}
+	return resp, nil
+}
+
+func (c *Client) CreateLease(tunnelID string, protocol string, accessToken string) (LeaseResponse, error) {
+	payload := map[string]any{
+		"tunnel_id": tunnelID,
+		"protocol":  protocol,
+	}
+
+	var resp LeaseResponse
+	if err := c.postJSON(c.controlURL("/api/v1/sessions/lease"), payload, accessToken, &resp); err != nil {
+		return LeaseResponse{}, err
+	}
+	return resp, nil
+}
+
+func (c *Client) RegisterEdge(lease LeaseResponse, tunnelID string, subdomain string, protocol string) error {
+	payload := map[string]any{
+		"session_id": lease.SessionID,
+		"tunnel_id":  tunnelID,
+		"subdomain":  subdomain,
+		"protocol":   protocol,
+	}
+	return c.postJSON(c.edgeURL("/v1/register"), payload, lease.SessionToken, nil)
+}
 
 // ── Internal HTTP helpers ──────────────────────────────────────────────────────
 
