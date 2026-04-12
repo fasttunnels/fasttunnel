@@ -1,0 +1,19 @@
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    - govet
+    - revive
+    - ineffassign
+    - staticcheck
+    - unused
+
+linters-settings:
+  revive:
+    rules:
+      - name: var-naming
+      - name: indent-error-flow
+
+issues:
+  exclude-use-default: false
