@@ -133,6 +133,28 @@ func (c *Client) RegisterEdge(lease LeaseResponse, tunnelID string, subdomain st
 	return c.postJSON(c.edgeURL("/v1/register"), payload, lease.SessionToken, nil)
 }
 
+// DeleteTunnel hard-deletes a tunnel from the control plane.
+// Called by the CLI on graceful shutdown to clean up the DB row and release
+// the subdomain for reuse.  The control plane cascades the delete to also
+// mark any active session as disconnected.
+func (c *Client) DeleteTunnel(tunnelID, accessToken string) error {
+	req, err := http.NewRequest(http.MethodDelete, c.controlURL("/api/v1/tunnels/"+tunnelID), nil)
+	if err != nil {
+		return fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		raw, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("api error (%d): %s", resp.StatusCode, string(raw))
+	}
+	return nil
+}
+
 // ── Internal HTTP helpers ──────────────────────────────────────────────────────
 
 func (c *Client) controlURL(path string) string {

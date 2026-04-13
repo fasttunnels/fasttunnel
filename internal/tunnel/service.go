@@ -31,6 +31,13 @@ func New(client *agent.Client) *Service {
 	return &Service{client: client}
 }
 
+// Cleanup deletes the tunnel on the control plane, triggering a cascade that
+// marks the active session as disconnected and releases the subdomain.
+// Should be deferred immediately after CreateAndRegister returns successfully.
+func (s *Service) Cleanup(tunnelID, accessToken string) error {
+	return s.client.DeleteTunnel(tunnelID, accessToken)
+}
+
 // CreateAndRegister runs the full three-step setup and returns a ready Lease.
 //
 // subdomain may be empty — the control plane will assign a random one.

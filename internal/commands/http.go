@@ -35,6 +35,15 @@ func RunHTTP(svc *tunnel.Service, protocol string, args []string) error {
 		return err
 	}
 
+	// Graceful cleanup: delete the tunnel (and cascade-disconnect the session)
+	// when the CLI exits normally.  For hard kills (SIGKILL) the edge handles
+	// session cleanup independently via NotifyDisconnect.
+	defer func() {
+		if err := svc.Cleanup(lease.TunnelID, authState.AccessToken); err != nil {
+			log.Printf("cleanup tunnel %s: %v", lease.TunnelID, err)
+		}
+	}()
+
 	fmt.Printf("\nfasttunnel %s tunnel active\n", protocol)
 	fmt.Printf("  public url  : %s\n", lease.PublicURL)
 	fmt.Printf("  local target: http://localhost:%d\n", *localPort)
