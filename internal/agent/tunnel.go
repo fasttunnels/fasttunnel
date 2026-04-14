@@ -218,16 +218,18 @@ func errorFrame(requestID string, status int, msg string) frame {
 }
 
 // httpToWS converts an http(s):// URL to a ws(s):// URL.
+// If the URL is already ws:// or wss:// it is returned unchanged.
 func httpToWS(rawURL string) string {
 	u, err := url.Parse(rawURL)
 	if err != nil {
-		return strings.Replace(rawURL, "http", "ws", 1)
+		return strings.Replace(rawURL, "http://", "ws://", 1)
 	}
 	switch u.Scheme {
 	case "https":
 		u.Scheme = "wss"
-	default:
+	case "http":
 		u.Scheme = "ws"
+	// "ws" and "wss" are already correct — leave them untouched.
 	}
 	return u.String()
 }

@@ -5,7 +5,6 @@ package commands
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"time"
 
@@ -13,10 +12,11 @@ import (
 	"github.com/fasttunnel/fasttunnel/cli/internal/auth"
 	"github.com/fasttunnel/fasttunnel/cli/internal/browser"
 	"github.com/fasttunnel/fasttunnel/cli/internal/callback"
+	"github.com/fasttunnel/fasttunnel/cli/internal/cmdparse"
 	"github.com/fasttunnel/fasttunnel/cli/internal/config"
 )
 
-// RunLogin handles the `login` subcommand.
+// RunLogin handles the login subcommand.
 //
 // It runs the OAuth 2.0 Authorization Code + PKCE flow:
 //  1. Generate code_verifier, code_challenge (S256), anti-CSRF state.
@@ -26,11 +26,9 @@ import (
 //  5. Wait for the callback (code + validated state).
 //  6. Exchange code for tokens via /auth/cli/token.
 //  7. Persist the access token to disk.
-func RunLogin(client *agent.Client, args []string) error {
-	fs := flag.NewFlagSet("login", flag.ExitOnError)
-	callbackPort := fs.Int("callback-port", 0, "optional local callback port override")
-	_ = fs.Parse(args)
-
+//
+// parsed is pre-resolved by cmdparse — no flag handling here.
+func RunLogin(client *agent.Client, parsed cmdparse.Login) error {
 	// 1. PKCE parameters.
 	verifier, err := auth.GenerateVerifier()
 	if err != nil {
@@ -43,8 +41,8 @@ func RunLogin(client *agent.Client, args []string) error {
 		return fmt.Errorf("generate state: %w", err)
 	}
 
-	// 2. Start callback server.
-	cbSrv, err := callback.Start(*callbackPort, expectedState)
+	// 2. Start callback server on the resolved port.
+	cbSrv, err := callback.Start(parsed.CallbackPort, expectedState)
 	if err != nil {
 		return fmt.Errorf("start callback server: %w", err)
 	}
@@ -86,6 +84,7 @@ func RunLogin(client *agent.Client, args []string) error {
 		return fmt.Errorf("save auth: %w", err)
 	}
 
-	fmt.Println("Login successful!")
+	fmt.Println("Logged in successfully.")
 	return nil
 }
+
