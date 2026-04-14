@@ -87,4 +87,3 @@ func RunLogin(client *agent.Client, parsed cmdparse.Login) error {
 	fmt.Println("Logged in successfully.")
 	return nil
 }
-

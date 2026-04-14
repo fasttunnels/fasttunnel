@@ -229,7 +229,7 @@ func httpToWS(rawURL string) string {
 		u.Scheme = "wss"
 	case "http":
 		u.Scheme = "ws"
-	// "ws" and "wss" are already correct — leave them untouched.
+		// "ws" and "wss" are already correct — leave them untouched.
 	}
 	return u.String()
 }

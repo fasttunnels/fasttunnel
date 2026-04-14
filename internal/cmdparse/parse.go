@@ -104,4 +104,3 @@ usage:
 func usageError() error {
 	return fmt.Errorf("no command specified\n\n%s", Usage())
 }
-
