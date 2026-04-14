@@ -8,6 +8,24 @@ import (
 	"path/filepath"
 )
 
+// DefaultControlPlaneURL and DefaultEdgeURL are the production endpoint
+// addresses baked into the binary at build time via:
+//
+//	-ldflags "-X github.com/fasttunnels/fasttunnel/cli/internal/config.DefaultControlPlaneURL=https://api.fasttunnel.dev"
+//
+// GoReleaser sets these automatically on every tagged release (see .goreleaser.yml).
+// A plain `go build` without ldflags falls back to the values below, which also
+// point at production — so the binary always works out of the box.
+//
+// Self-hosters can override at runtime without rebuilding:
+//
+//	export FASTTUNNEL_CONTROL_URL=https://api.mycompany.com
+//	export FASTTUNNEL_EDGE_URL=https://edge.mycompany.com
+var (
+	DefaultControlPlaneURL = "https://api.fasttunnel.dev"
+	DefaultEdgeURL         = "https://edge.fasttunnel.dev"
+)
+
 // Config holds the remote endpoint addresses the CLI communicates with.
 // Values are resolved from environment variables at startup via Load().
 type Config struct {
@@ -20,11 +38,12 @@ type AuthState struct {
 	AccessToken string `json:"access_token"`
 }
 
-// Load resolves a Config from environment variables, falling back to defaults.
+// Load resolves a Config from environment variables, falling back to the
+// production defaults baked in at build time via ldflags.
 func Load() Config {
 	return Config{
-		ControlPlaneURL: envOr("FASTTUNNEL_CONTROL_URL", "https://api.fasttunnel.dev"),
-		EdgeURL:         envOr("FASTTUNNEL_EDGE_URL", "https://edge.fasttunnel.dev"),
+		ControlPlaneURL: envOr("FASTTUNNEL_CONTROL_URL", DefaultControlPlaneURL),
+		EdgeURL:         envOr("FASTTUNNEL_EDGE_URL", DefaultEdgeURL),
 	}
 }
 
