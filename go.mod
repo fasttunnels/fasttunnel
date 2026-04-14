@@ -1,4 +1,4 @@
-module github.com/fasttunnel/fasttunnel/cli
+module github.com/fasttunnels/fasttunnel/cli
 
 go 1.23.0
 
