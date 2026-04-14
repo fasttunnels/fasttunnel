@@ -73,6 +73,9 @@ func RunAgentLoop(ctx context.Context, edgeHTTPURL, sessionToken string, localPo
 
 		err := runOnce(ctx, wsURL, sessionToken, localPort)
 		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			log.Printf("agent disconnected: %v — reconnecting in %s", err, backoff)
 		}
 
@@ -101,10 +104,25 @@ func runOnce(ctx context.Context, wsURL, sessionToken string, localPort int) err
 
 	log.Printf("agent connected to %s", wsURL)
 
-	// Reset backoff on successful connect is handled by the caller.
+	// conn.ReadMessage() is blocking and does not respect context cancellation.
+	// This goroutine watches for ctx cancellation and closes the connection,
+	// which causes ReadMessage to return immediately with an error.
+	go func() {
+		<-ctx.Done()
+		_ = conn.WriteMessage(
+			websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.CloseNormalClosure, "shutting down"),
+		)
+		conn.Close()
+	}()
+
 	for {
 		_, msg, err := conn.ReadMessage()
 		if err != nil {
+			// If the context was cancelled this is an intentional shutdown, not an error.
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			return fmt.Errorf("read: %w", err)
 		}
 
