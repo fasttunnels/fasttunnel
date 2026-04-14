@@ -28,6 +28,9 @@ func Parse(args []string) (Parsed, error) {
 
 	// ── Fast path: first arg is a known subcommand ─────────────────────────
 	switch cmd := strings.ToLower(args[0]); cmd {
+	case "version":
+		return Parsed{Name: CmdVersion}, nil
+
 	case "http", "https":
 		t, err := parseTunnel(cmd, args[1:])
 		if err != nil {
@@ -44,9 +47,13 @@ func Parse(args []string) (Parsed, error) {
 	}
 
 	// ── Slow path: scan for --protocol / -P without flag.FlagSet ──────────
-	// flag.FlagSet stops at the first unknown flag (even with ContinueOnError),
-	// so we manually extract the protocol value and leave the rest intact for
-	// parseTunnel to handle.
+	// Also catch --version / -v / -V anywhere in the args.
+	for _, a := range args {
+		if a == "--version" || a == "-v" || a == "-V" {
+			return Parsed{Name: CmdVersion}, nil
+		}
+	}
+
 	protocol, rest, found := extractProtocol(args)
 	if found {
 		p := strings.ToLower(protocol)
@@ -98,6 +105,7 @@ usage:
   fasttunnel --protocol http  --port <port> [--subdomain <subdomain>]
   fasttunnel --protocol https -p <port> [-s <subdomain>]
   fasttunnel login [-c <callback-port>]
+  fasttunnel version
 `)
 }
 

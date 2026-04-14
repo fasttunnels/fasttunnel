@@ -24,9 +24,10 @@ package cmdparse
 type CommandName string
 
 const (
-	CmdHTTP  CommandName = "http"
-	CmdHTTPS CommandName = "https"
-	CmdLogin CommandName = "login"
+	CmdHTTP    CommandName = "http"
+	CmdHTTPS   CommandName = "https"
+	CmdLogin   CommandName = "login"
+	CmdVersion CommandName = "version"
 )
 
 // Parsed is the fully resolved, normalised result of a Parse call.

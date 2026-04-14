@@ -8,10 +8,10 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/fasttunnel/fasttunnel/cli/internal/agent"
-	"github.com/fasttunnel/fasttunnel/cli/internal/cmdparse"
-	"github.com/fasttunnel/fasttunnel/cli/internal/config"
-	"github.com/fasttunnel/fasttunnel/cli/internal/tunnel"
+	"github.com/fasttunnels/fasttunnel/cli/internal/agent"
+	"github.com/fasttunnels/fasttunnel/cli/internal/cmdparse"
+	"github.com/fasttunnels/fasttunnel/cli/internal/config"
+	"github.com/fasttunnels/fasttunnel/cli/internal/tunnel"
 )
 
 // RunHTTP handles the http and https subcommands.

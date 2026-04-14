@@ -9,10 +9,23 @@ import (
 	"log"
 	"os"
 
-	"github.com/fasttunnel/fasttunnel/cli/internal/agent"
-	"github.com/fasttunnel/fasttunnel/cli/internal/cmdparse"
-	"github.com/fasttunnel/fasttunnel/cli/internal/commands"
-	"github.com/fasttunnel/fasttunnel/cli/internal/tunnel"
+	"github.com/fasttunnels/fasttunnel/cli/internal/agent"
+	"github.com/fasttunnels/fasttunnel/cli/internal/cmdparse"
+	"github.com/fasttunnels/fasttunnel/cli/internal/commands"
+	"github.com/fasttunnels/fasttunnel/cli/internal/tunnel"
+)
+
+// Build-time version info — injected by GoReleaser via ldflags:
+//
+//	-X main.version=v1.2.3
+//	-X main.commit=abc1234
+//	-X main.buildDate=2026-04-14
+//
+// A plain `go build` without ldflags leaves these as "dev".
+var (
+	version   = "dev"
+	commit    = "none"
+	buildDate = "unknown"
 )
 
 func main() {
@@ -28,6 +41,8 @@ func main() {
 
 	// ── Dispatch ──────────────────────────────────────────────────────────────
 	switch parsed.Name {
+	case cmdparse.CmdVersion:
+		commands.RunVersion(version, commit, buildDate)
 	case cmdparse.CmdLogin:
 		if err := commands.RunLogin(client, parsed.Login); err != nil {
 			log.Fatal(err)

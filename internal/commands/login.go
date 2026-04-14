@@ -8,12 +8,12 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/fasttunnel/fasttunnel/cli/internal/agent"
-	"github.com/fasttunnel/fasttunnel/cli/internal/auth"
-	"github.com/fasttunnel/fasttunnel/cli/internal/browser"
-	"github.com/fasttunnel/fasttunnel/cli/internal/callback"
-	"github.com/fasttunnel/fasttunnel/cli/internal/cmdparse"
-	"github.com/fasttunnel/fasttunnel/cli/internal/config"
+	"github.com/fasttunnels/fasttunnel/cli/internal/agent"
+	"github.com/fasttunnels/fasttunnel/cli/internal/auth"
+	"github.com/fasttunnels/fasttunnel/cli/internal/browser"
+	"github.com/fasttunnels/fasttunnel/cli/internal/callback"
+	"github.com/fasttunnels/fasttunnel/cli/internal/cmdparse"
+	"github.com/fasttunnels/fasttunnel/cli/internal/config"
 )
 
 // RunLogin handles the login subcommand.
