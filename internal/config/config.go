@@ -23,8 +23,8 @@ type AuthState struct {
 // Load resolves a Config from environment variables, falling back to defaults.
 func Load() Config {
 	return Config{
-		ControlPlaneURL: envOr("FASTTUNNEL_CONTROL_URL", "http://localhost:8000"),
-		EdgeURL:         envOr("FASTTUNNEL_EDGE_URL", "http://localhost:8081"),
+		ControlPlaneURL: envOr("FASTTUNNEL_CONTROL_URL", "https://api.fasttunnel.dev"),
+		EdgeURL:         envOr("FASTTUNNEL_EDGE_URL", "https://edge.fasttunnel.dev"),
 	}
 }
 
