@@ -31,6 +31,16 @@ func Parse(args []string) (Parsed, error) {
 	case "version":
 		return Parsed{Name: CmdVersion}, nil
 
+	case "completion":
+		if len(args) < 2 {
+			return Parsed{}, fmt.Errorf("completion requires a shell: zsh|bash|fish")
+		}
+		shell := strings.ToLower(args[1])
+		if shell != "zsh" && shell != "bash" && shell != "fish" {
+			return Parsed{}, fmt.Errorf("unsupported completion shell %q (expected: zsh|bash|fish)", args[1])
+		}
+		return Parsed{Name: CmdCompletion, Completion: Completion{Shell: shell}}, nil
+
 	case "http", "https":
 		t, err := parseTunnel(cmd, args[1:])
 		if err != nil {
@@ -105,6 +115,7 @@ usage:
   fasttunnel --protocol http  --port <port> [--subdomain <subdomain>]
   fasttunnel --protocol https -p <port> [-s <subdomain>]
   fasttunnel login [-c <callback-port>]
+	fasttunnel completion <zsh|bash|fish>
   fasttunnel version
 `)
 }
