@@ -105,6 +105,7 @@ func runOnce(ctx context.Context, wsURL, sessionToken string, localPort int) err
 	defer func() {
 		if err := conn.Close(); err != nil {
 			// Silently ignore close errors
+			telemetry.SilentLogProdError(err)
 		}
 	}()
 
@@ -123,7 +124,7 @@ func runOnce(ctx context.Context, wsURL, sessionToken string, localPort int) err
 		)
 		func() {
 			if err := conn.Close(); err != nil {
-				fmt.Printf("failed to close response connection: %v\n", err)
+				telemetry.SilentLogProdError(err)
 			}
 		}()
 	}()
@@ -198,6 +199,7 @@ func handleHTTPRequest(ctx context.Context, conn *websocket.Conn, writeMu *sync.
 	}
 	if err := writeJSON(conn, writeMu, websocket.TextMessage, data); err != nil {
 		// Silently skip if we can't write the response
+		telemetry.SilentLogProdError(err)
 	}
 }
 
@@ -253,6 +255,7 @@ func forwardToLocal(ctx context.Context, req frame, localPort int) frame {
 	defer func() {
 		if err := httpResp.Body.Close(); err != nil {
 			// Silently ignore errors closing response body
+			telemetry.SilentLogProdError(err)
 		}
 	}()
 
