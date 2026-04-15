@@ -6,7 +6,7 @@ package tunnel
 import (
 	"fmt"
 
-	"github.com/fasttunnels/fasttunnel/cli/internal/agent"
+	"github.com/fasttunnels/fasttunnel/internal/agent"
 )
 
 // Lease contains every runtime value the CLI needs once a tunnel is active.

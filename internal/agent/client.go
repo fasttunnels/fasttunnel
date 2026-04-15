@@ -7,7 +7,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/fasttunnels/fasttunnel/cli/internal/config"
+	"github.com/fasttunnels/fasttunnel/internal/config"
 )
 
 type Client struct {

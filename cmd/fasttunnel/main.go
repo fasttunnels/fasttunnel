@@ -9,10 +9,10 @@ import (
 	"log"
 	"os"
 
-	"github.com/fasttunnels/fasttunnel/cli/internal/agent"
-	"github.com/fasttunnels/fasttunnel/cli/internal/cmdparse"
-	"github.com/fasttunnels/fasttunnel/cli/internal/commands"
-	"github.com/fasttunnels/fasttunnel/cli/internal/tunnel"
+	"github.com/fasttunnels/fasttunnel/internal/agent"
+	"github.com/fasttunnels/fasttunnel/internal/cmdparse"
+	"github.com/fasttunnels/fasttunnel/internal/commands"
+	"github.com/fasttunnels/fasttunnel/internal/tunnel"
 )
 
 // Build-time version info — injected by GoReleaser via ldflags:

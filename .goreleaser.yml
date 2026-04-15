@@ -17,8 +17,6 @@ builds:
     goos: [linux, darwin, windows]
     goarch: [amd64, arm64]
     ignore:
-      # Windows arm64 binaries exist but almost no CI runners test them.
-      # Remove this ignore block once you have arm64 Windows test coverage.
       - goos: windows
         goarch: arm64
     ldflags:
@@ -38,7 +36,7 @@ archives:
     format_overrides:
       - goos: windows
         formats: [zip]
-    # fasttunnel_1.2.3_linux_amd64.tar.gz
+
     name_template: "fasttunnel_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - src: cli/README.md
@@ -46,12 +44,10 @@ archives:
         strip_parent: true
       - LICENSE*
 
-# ── Checksums ─────────────────────────────────────────────────────────────────
 checksum:
   name_template: checksums.txt
   algorithm: sha256
 
-# ── Signing (cosign keyless in CI; key-based locally) ─────────────────────────
 signs:
   - cmd: cosign
     env:
@@ -67,14 +63,12 @@ signs:
     artifacts: all
     output: true
 
-# ── Homebrew tap ──────────────────────────────────────────────────────────────
-# GoReleaser auto-generates and pushes the Formula to your tap repo.
-# Create the repo X4MU-L/homebrew-fasttunnel (public) ahead of time.
+# ── Homebrew tap ────────
 brews:
   - name: fasttunnel
     repository:
       owner: fasttunnels
-      name: homebrew-fasttunnel # rename to match your actual tap repo
+      name: homebrew-fasttunnel
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     directory: Formula
     homepage: https://fasttunnel.dev
@@ -85,9 +79,7 @@ brews:
     test: |
       system "#{bin}/fasttunnel --version"
 
-# ── Linux packages (deb / rpm / apk) ─────────────────────────────────────────
-# Lets users: apt install fasttunnel  (after adding your repo)
-#             yum install fasttunnel  (after adding your repo)
+# Linux packages (deb / rpm / apk)
 nfpms:
   - id: packages
     package_name: fasttunnel
@@ -102,18 +94,16 @@ nfpms:
       - apk
     bindir: /usr/local/bin
 
-# ── Scoop bucket (Windows) ────────────────────────────────────────────────────
-# Create the repo X4MU-L/scoop-fasttunnel (public) ahead of time.
 scoops:
   - repository:
-      owner: X4MU-L
+      owner: fasttunnels
       name: scoop-fasttunnel
       token: "{{ .Env.SCOOP_BUCKET_TOKEN }}"
     homepage: https://fasttunnel.dev
     description: FastTunnel CLI — open-source tunneling
     license: MIT
 
-# ── GitHub Release ────────────────────────────────────────────────────────────
+# GitHub Release
 release:
   github:
     owner: fasttunnels
