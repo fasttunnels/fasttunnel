@@ -3,7 +3,6 @@ package commands
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -11,6 +10,7 @@ import (
 	"github.com/fasttunnels/fasttunnel/internal/agent"
 	"github.com/fasttunnels/fasttunnel/internal/cmdparse"
 	"github.com/fasttunnels/fasttunnel/internal/config"
+	"github.com/fasttunnels/fasttunnel/internal/telemetry"
 	"github.com/fasttunnels/fasttunnel/internal/tunnel"
 )
 
@@ -20,7 +20,7 @@ import (
 func RunHTTP(svc *tunnel.Service, parsed cmdparse.Tunnel) error {
 	authState, err := config.LoadAuth()
 	if err != nil {
-		return fmt.Errorf("not logged in (%w)\nRun: fasttunnel login", err)
+		return fmt.Errorf("not logged in...\n\nRun: fasttunnel login")
 	}
 
 	lease, err := svc.CreateAndRegister(parsed.Subdomain, parsed.Protocol, parsed.Port, authState.AccessToken)
@@ -33,22 +33,24 @@ func RunHTTP(svc *tunnel.Service, parsed cmdparse.Tunnel) error {
 	// session cleanup independently via NotifyDisconnect.
 	defer func() {
 		if err := svc.Cleanup(lease.TunnelID, authState.AccessToken); err != nil {
-			log.Printf("cleanup tunnel %s: %v", lease.TunnelID, err)
+			// Silently ignore errors on cleanup
+			telemetry.SilentLogProdError(err)
 		}
 	}()
 
-	fmt.Printf("\nfasttunnel %s tunnel active\n", parsed.Protocol)
-	fmt.Printf("  public url  : %s\n", lease.PublicURL)
-	fmt.Printf("  local target: http://localhost:%d\n", parsed.Port)
-	fmt.Printf("  subdomain   : %s\n", lease.Subdomain)
-	fmt.Println("\nForwarding requests — press Ctrl+C to stop.")
+	telemetry.LogInfo(fmt.Sprintf("\nfasttunnel %s tunnel active", parsed.Protocol))
+	telemetry.LogInfo(fmt.Sprintf("  public url  : %s", lease.PublicURL))
+	telemetry.LogInfo(fmt.Sprintf("  local target: http://localhost:%d", parsed.Port))
+	telemetry.LogInfo(fmt.Sprintf("  subdomain   : %s", lease.Subdomain))
+	telemetry.LogInfo("\nForwarding requests — press Ctrl+C to stop.")
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	if err := agent.RunAgentLoop(ctx, lease.EdgeURL, lease.SessionToken, parsed.Port); err != nil && err != context.Canceled {
-		log.Printf("agent loop exited: %v", err)
+		// Agent loop errors are already logged by telemetry in agent/tunnel.go
+		telemetry.SilentLogProdError(err)
 	}
-	fmt.Println("\nTunnel closed.")
+	telemetry.LogInfo("\nTunnel closed.")
 	return nil
 }

@@ -82,9 +82,14 @@ Requires Go 1.22+.
 All release binaries are signed with [cosign](https://docs.sigstore.dev/cosign/overview).
 
 ```sh
+# example for linux amd64; swap asset names for your platform
+curl -LO https://github.com/fasttunnels/fasttunnel/releases/download/v0.1.1/fasttunnel_0.1.1_linux_amd64.tar.gz
+curl -LO https://github.com/fasttunnels/fasttunnel/releases/download/v0.1.1/fasttunnel_0.1.1_linux_amd64.tar.gz.sig
+
 cosign verify-blob \
-  --signature fasttunnel_linux_amd64.tar.gz.sig \
-  fasttunnel_linux_amd64.tar.gz
+  --key cosign.pub \
+  --signature fasttunnel_0.1.1_linux_amd64.tar.gz.sig \
+  fasttunnel_0.1.1_linux_amd64.tar.gz
 ```
 
 Checksums are in `checksums.txt` attached to each release.
