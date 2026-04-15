@@ -134,7 +134,6 @@ release:
     cosign verify-blob --signature fasttunnel-linux-amd64.sig fasttunnel-linux-amd64
     ```
 
-# ── Changelog ─────────────────────────────────────────────────────────────────
 changelog:
   sort: asc
   use: github
