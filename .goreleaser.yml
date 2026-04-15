@@ -1,0 +1,170 @@
+version: 2
+project_name: fasttunnel
+
+before:
+  hooks:
+    - go mod tidy
+    - go generate ./...
+
+# ── Builds ────────────────────────────────────────────────────────────────────
+builds:
+  - id: fasttunnel
+    dir: cli
+    main: ./cmd/fasttunnel
+    binary: fasttunnel
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    ignore:
+      # Windows arm64 binaries exist but almost no CI runners test them.
+      # Remove this ignore block once you have arm64 Windows test coverage.
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.ShortCommit}}
+      - -X main.buildDate={{.Date}}
+      - -X github.com/fasttunnels/fasttunnel/cli/internal/config.DefaultControlPlaneURL=https://api.fasttunnel.dev
+      - -X github.com/fasttunnels/fasttunnel/cli/internal/config.DefaultEdgeURL=https://edge.fasttunnel.dev
+    flags:
+      - -trimpath
+
+# ── Archives (tarballs / zips) ────────────────────────────────────────────────
+archives:
+  - id: default
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    # fasttunnel_1.2.3_linux_amd64.tar.gz
+    name_template: "fasttunnel_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - src: cli/README.md
+        dst: README.md
+        strip_parent: true
+      - LICENSE*
+
+# ── Checksums ─────────────────────────────────────────────────────────────────
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+# ── Signing (cosign keyless in CI; key-based locally) ─────────────────────────
+signs:
+  - cmd: cosign
+    env:
+      - COSIGN_EXPERIMENTAL=1
+    certificate: "${artifact}.pem"
+    args:
+      - sign-blob
+      - "--yes"
+      - "--key=env://COSIGN_PRIVATE_KEY"
+      - "--output-signature=${signature}"
+      - "--output-certificate=${certificate}"
+      - "${artifact}"
+    artifacts: all
+    output: true
+
+# ── Homebrew tap ──────────────────────────────────────────────────────────────
+# GoReleaser auto-generates and pushes the Formula to your tap repo.
+# Create the repo X4MU-L/homebrew-fasttunnel (public) ahead of time.
+brews:
+  - name: fasttunnel
+    repository:
+      owner: fasttunnels
+      name: homebrew-fasttunnel # rename to match your actual tap repo
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: https://fasttunnel.dev
+    description: "Open-source tunneling — expose local services to the internet instantly."
+    license: MIT
+    install: |
+      bin.install "fasttunnel"
+    test: |
+      system "#{bin}/fasttunnel --version"
+
+# ── Linux packages (deb / rpm / apk) ─────────────────────────────────────────
+# Lets users: apt install fasttunnel  (after adding your repo)
+#             yum install fasttunnel  (after adding your repo)
+nfpms:
+  - id: packages
+    package_name: fasttunnel
+    vendor: FastTunnel
+    homepage: https://fasttunnel.dev
+    maintainer: FastTunnel <support@fasttunnel.dev>
+    description: Open-source tunneling CLI — ngrok alternative
+    license: MIT
+    formats:
+      - deb
+      - rpm
+      - apk
+    bindir: /usr/local/bin
+
+# ── Scoop bucket (Windows) ────────────────────────────────────────────────────
+# Create the repo X4MU-L/scoop-fasttunnel (public) ahead of time.
+scoops:
+  - repository:
+      owner: X4MU-L
+      name: scoop-fasttunnel
+      token: "{{ .Env.SCOOP_BUCKET_TOKEN }}"
+    homepage: https://fasttunnel.dev
+    description: FastTunnel CLI — open-source tunneling
+    license: MIT
+
+# ── GitHub Release ────────────────────────────────────────────────────────────
+release:
+  github:
+    owner: fasttunnels
+    name: fasttunnel
+  draft: false
+  prerelease: auto # tags like v1.0.0-beta become pre-releases automatically
+  footer: |
+    ## Installation
+
+    **macOS / Linux (curl)**
+    ```sh
+    curl -sSL https://fasttunnel.dev/install.sh | sh
+    ```
+
+    **macOS (Homebrew)**
+    ```sh
+    brew install fasttunnels/fasttunnel/fasttunnel
+    ```
+
+    **Windows (PowerShell)**
+    ```powershell
+    irm https://fasttunnel.dev/install.ps1 | iex
+    ```
+
+    **Linux (deb)**
+    ```sh
+    # See https://fasttunnel.dev/docs/install for apt repo setup
+    ```
+
+    **Verify signature**
+    ```sh
+    cosign verify-blob --signature fasttunnel-linux-amd64.sig fasttunnel-linux-amd64
+    ```
+
+# ── Changelog ─────────────────────────────────────────────────────────────────
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "Merge pull request"
+      - "Merge branch"
+  groups:
+    - title: "New Features"
+      regexp: "^feat"
+      order: 0
+    - title: "Bug Fixes"
+      regexp: "^fix"
+      order: 1
+    - title: "Other"
+      order: 999

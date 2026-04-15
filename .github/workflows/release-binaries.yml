@@ -1,0 +1,49 @@
+name: release-binaries
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write # create GitHub releases
+  packages: write
+  id-token: write # cosign keyless OIDC signing
+
+jobs:
+  # ── Single GoReleaser job replaces the old manual matrix ─────────────────────
+  # GoReleaser handles: cross-compilation, archives, checksums, cosign signing,
+  # GitHub Release creation, Homebrew formula push, Scoop bucket push,
+  # and deb/rpm/apk package generation — all driven by .goreleaser.yml.
+  goreleaser:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history — needed for changelog)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+          cache: true
+          cache-dependency-path: cli/go.sum
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+          # Fine-grained PATs — create in Settings → Secrets:
+          #   HOMEBREW_TAP_TOKEN  — write access to X4MU-L/homebrew-fasttunnel
+          #   SCOOP_BUCKET_TOKEN  — write access to X4MU-L/scoop-fasttunnel
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          SCOOP_BUCKET_TOKEN: ${{ secrets.SCOOP_BUCKET_TOKEN }}
