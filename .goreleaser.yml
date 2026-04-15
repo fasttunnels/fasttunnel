@@ -48,13 +48,11 @@ signs:
   - cmd: cosign
     env:
       - COSIGN_EXPERIMENTAL=1
-    certificate: "${artifact}.pem"
     args:
       - sign-blob
       - "--yes"
       - "--key=env://COSIGN_PRIVATE_KEY"
       - "--output-signature=${signature}"
-      - "--output-certificate=${certificate}"
       - "${artifact}"
     artifacts: all
     output: true
