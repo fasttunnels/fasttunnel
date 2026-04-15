@@ -34,6 +34,7 @@ func RunHTTP(svc *tunnel.Service, parsed cmdparse.Tunnel) error {
 	defer func() {
 		if err := svc.Cleanup(lease.TunnelID, authState.AccessToken); err != nil {
 			// Silently ignore errors on cleanup
+			// TODO: Clean up with edge secret if client error (e.g. invalid token) since auth state may be stale
 			telemetry.SilentLogProdError(err)
 		}
 	}()
