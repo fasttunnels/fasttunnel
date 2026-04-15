@@ -43,6 +43,11 @@ func main() {
 	switch parsed.Name {
 	case cmdparse.CmdVersion:
 		commands.RunVersion(version, commit, buildDate)
+	case cmdparse.CmdCompletion:
+		if err := commands.RunCompletion(parsed.Completion.Shell); err != nil {
+			telemetry.LogError(err.Error(), "")
+			os.Exit(1)
+		}
 	case cmdparse.CmdLogin:
 		if err := commands.RunLogin(client, parsed.Login); err != nil {
 			apiErr, ok := err.(*telemetry.APIError)

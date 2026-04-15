@@ -24,10 +24,11 @@ package cmdparse
 type CommandName string
 
 const (
-	CmdHTTP    CommandName = "http"
-	CmdHTTPS   CommandName = "https"
-	CmdLogin   CommandName = "login"
-	CmdVersion CommandName = "version"
+	CmdHTTP       CommandName = "http"
+	CmdHTTPS      CommandName = "https"
+	CmdLogin      CommandName = "login"
+	CmdCompletion CommandName = "completion"
+	CmdVersion    CommandName = "version"
 )
 
 // Parsed is the fully resolved, normalised result of a Parse call.
@@ -40,6 +41,9 @@ type Parsed struct {
 
 	// Login is populated when Name is CmdLogin.
 	Login Login
+
+	// Completion is populated when Name is CmdCompletion.
+	Completion Completion
 }
 
 // Tunnel holds the normalised arguments for an http / https tunnel command.
@@ -60,4 +64,9 @@ type Login struct {
 	// CallbackPort is the ephemeral local HTTP server port used for the
 	// OAuth 2.0 PKCE redirect.  Defaults to 0 (OS-assigned free port).
 	CallbackPort int
+}
+
+// Completion holds the shell target for completion script generation.
+type Completion struct {
+	Shell string
 }

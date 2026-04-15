@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -234,16 +235,30 @@ func forwardToLocal(ctx context.Context, req frame, localPort int) frame {
 	if err != nil {
 		return errorFrame(req.RequestID, http.StatusBadGateway, "failed to build request")
 	}
+	httpReq.Host = fmt.Sprintf("localhost:%d", localPort)
+
+	originalHost := firstHeaderValue(req.Headers, "Host")
+	originalProto := firstHeaderValue(req.Headers, "X-Forwarded-Proto")
 
 	// Copy headers, skipping hop-by-hop headers.
 	for k, vals := range req.Headers {
-		switch strings.ToLower(k) {
-		case "connection", "transfer-encoding", "host":
+		if isHopByHopHeader(k) || strings.EqualFold(k, "host") {
 			continue
 		}
 		for _, v := range vals {
 			httpReq.Header.Add(k, v)
 		}
+	}
+
+	if originalHost != "" {
+		httpReq.Header.Set("X-Forwarded-Host", originalHost)
+	}
+	if originalProto != "" {
+		httpReq.Header.Set("X-Forwarded-Proto", originalProto)
+	}
+
+	if rewrittenOrigin, ok := rewriteOriginForLocal(httpReq.Header.Get("Origin"), originalHost, localPort); ok {
+		httpReq.Header.Set("Origin", rewrittenOrigin)
 	}
 
 	client := &http.Client{Timeout: 25 * time.Second}
@@ -267,8 +282,7 @@ func forwardToLocal(ctx context.Context, req frame, localPort int) frame {
 
 	respHeaders := make(map[string][]string)
 	for k, vals := range httpResp.Header {
-		switch strings.ToLower(k) {
-		case "transfer-encoding":
+		if isHopByHopHeader(k) {
 			continue
 		}
 		respHeaders[k] = vals
@@ -281,6 +295,53 @@ func forwardToLocal(ctx context.Context, req frame, localPort int) frame {
 		Headers:   respHeaders,
 		Body:      base64.StdEncoding.EncodeToString(respBody),
 	}
+}
+
+func isHopByHopHeader(header string) bool {
+	switch strings.ToLower(header) {
+	case "connection", "proxy-connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade":
+		return true
+	default:
+		return false
+	}
+}
+
+func firstHeaderValue(headers map[string][]string, key string) string {
+	for hKey, vals := range headers {
+		if !strings.EqualFold(hKey, key) {
+			continue
+		}
+		if len(vals) == 0 {
+			return ""
+		}
+		return vals[0]
+	}
+	return ""
+}
+
+func rewriteOriginForLocal(origin, originalHost string, localPort int) (string, bool) {
+	if origin == "" || originalHost == "" {
+		return "", false
+	}
+
+	originURL, err := url.Parse(origin)
+	if err != nil || originURL.Host == "" {
+		return "", false
+	}
+
+	originHost := originURL.Hostname()
+	forwardedHost, _, err := net.SplitHostPort(originalHost)
+	if err != nil {
+		forwardedHost = originalHost
+	}
+
+	if !strings.EqualFold(originHost, forwardedHost) {
+		return "", false
+	}
+
+	originURL.Scheme = "http"
+	originURL.Host = fmt.Sprintf("localhost:%d", localPort)
+	return originURL.String(), true
 }
 
 func errorFrame(requestID string, status int, msg string) frame {
