@@ -6,10 +6,9 @@ before:
     - go mod tidy
     - go generate ./...
 
-# ── Builds ────────────────────────────────────────────────────────────────────
 builds:
   - id: fasttunnel
-    dir: cli
+    dir: .
     main: ./cmd/fasttunnel
     binary: fasttunnel
     env:
@@ -24,12 +23,11 @@ builds:
       - -X main.version={{.Version}}
       - -X main.commit={{.ShortCommit}}
       - -X main.buildDate={{.Date}}
-      - -X github.com/fasttunnels/fasttunnel/cli/internal/config.DefaultControlPlaneURL=https://api.fasttunnel.dev
-      - -X github.com/fasttunnels/fasttunnel/cli/internal/config.DefaultEdgeURL=https://edge.fasttunnel.dev
+      - -X github.com/fasttunnels/fasttunnel/internal/config.DefaultControlPlaneURL=https://api.fasttunnel.dev
+      - -X github.com/fasttunnels/fasttunnel/internal/config.DefaultEdgeURL=https://edge.fasttunnel.dev
     flags:
       - -trimpath
 
-# ── Archives (tarballs / zips) ────────────────────────────────────────────────
 archives:
   - id: default
     formats: [tar.gz]
@@ -39,9 +37,7 @@ archives:
 
     name_template: "fasttunnel_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
-      - src: cli/README.md
-        dst: README.md
-        strip_parent: true
+      - README.md
       - LICENSE*
 
 checksum:
@@ -109,7 +105,7 @@ release:
     owner: fasttunnels
     name: fasttunnel
   draft: false
-  prerelease: auto # tags like v1.0.0-beta become pre-releases automatically
+  prerelease: auto
   footer: |
     ## Installation
 
