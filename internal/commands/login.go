@@ -14,6 +14,7 @@ import (
 	"github.com/fasttunnels/fasttunnel/internal/callback"
 	"github.com/fasttunnels/fasttunnel/internal/cmdparse"
 	"github.com/fasttunnels/fasttunnel/internal/config"
+	"github.com/fasttunnels/fasttunnel/internal/telemetry"
 )
 
 // RunLogin handles the login subcommand.
@@ -59,13 +60,13 @@ func RunLogin(client *agent.Client, parsed cmdparse.Login) error {
 	}
 
 	// 4. Guide user to the browser.
-	fmt.Printf("\nOpen this URL to authenticate:\n%s\n\n", init.LoginURL)
+	telemetry.LogInfo(fmt.Sprintf("\nOpen this URL to authenticate:\n%s\n", init.LoginURL))
 	if browser.Open(init.LoginURL) {
-		fmt.Println("Browser opened automatically.")
+		telemetry.LogInfo("Browser opened automatically.")
 	} else {
-		fmt.Println("Could not open browser — open the URL above manually.")
+		telemetry.LogInfo("Could not open browser — open the URL above manually.")
 	}
-	fmt.Println("Waiting for browser callback...")
+	telemetry.LogInfo("Waiting for browser callback...")
 
 	// 5. Wait for the redirect (state validated inside callback.Server).
 	result, err := cbSrv.Wait(600 * time.Second)
@@ -84,6 +85,6 @@ func RunLogin(client *agent.Client, parsed cmdparse.Login) error {
 		return fmt.Errorf("save auth: %w", err)
 	}
 
-	fmt.Println("Logged in successfully.")
+	telemetry.LogInfo("Logged in successfully.")
 	return nil
 }

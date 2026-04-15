@@ -6,13 +6,16 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/fasttunnels/fasttunnel/internal/config"
+	"github.com/fasttunnels/fasttunnel/internal/telemetry"
 )
 
 type Client struct {
 	httpClient *http.Client
 	config     config.Config
+	version    string
 }
 
 // ── PKCE CLI auth responses ────────────────────────────────────────────────────
@@ -46,10 +49,17 @@ type LeaseResponse struct {
 	ExpiresIn    int    `json:"expires_in"`
 }
 
-func NewClient() *Client {
+type apiErrorPayload struct {
+	Detail     string `json:"detail"`
+	Code       string `json:"code"`
+	StatusCode int    `json:"status_code"`
+}
+
+func NewClient(version string) *Client {
 	return &Client{
 		httpClient: &http.Client{},
 		config:     config.Default(),
+		version:    version,
 	}
 }
 
@@ -150,13 +160,18 @@ func (c *Client) DeleteTunnel(tunnelID, accessToken string) error {
 
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
-			fmt.Printf("failed to close response body: %v\n", err)
+			// Silently ignore errors closing response body
+			telemetry.SilentLogProdError(err)
 		}
 	}()
 
 	if resp.StatusCode >= 400 {
 		raw, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("api error (%d): %s", resp.StatusCode, string(raw))
+		apiErr := buildAPIError(req.Method, req.URL.Path, resp.StatusCode, raw)
+		if apiErr.Silent {
+			return nil
+		}
+		return apiErr
 	}
 	return nil
 }
@@ -198,7 +213,8 @@ func (c *Client) postJSON(url string, payload any, token string, out any) error 
 
 	if resp.StatusCode >= 400 {
 		raw, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("api error (%d): %s", resp.StatusCode, string(raw))
+		apiErr := buildAPIError(req.Method, req.URL.Path, resp.StatusCode, raw)
+		return apiErr
 	}
 
 	if out == nil {
@@ -208,4 +224,80 @@ func (c *Client) postJSON(url string, payload any, token string, out any) error 
 		return fmt.Errorf("failed to decode response: %w", err)
 	}
 	return nil
+}
+
+func buildAPIError(method, requestPath string, statusCode int, raw []byte) *telemetry.APIError {
+	endpoint := normalizeEndpoint(method, requestPath)
+
+	var payload apiErrorPayload
+	_ = json.Unmarshal(raw, &payload)
+
+	detail := payload.Detail
+	if detail == "" {
+		detail = strings.TrimSpace(string(raw))
+	}
+
+	userMsg, silent := mapAPIUserMessage(endpoint, payload.Code)
+	if userMsg == "" {
+		userMsg = detail
+	}
+
+	return telemetry.BuildAPIError(method, endpoint, statusCode, payload.Code, detail, userMsg, silent)
+}
+
+func normalizeEndpoint(method, requestPath string) string {
+	switch {
+	case method == http.MethodPost && requestPath == "/api/v1/auth/cli/init":
+		return "/api/v1/auth/cli/init"
+	case method == http.MethodPost && requestPath == "/api/v1/auth/cli/token":
+		return "/api/v1/auth/cli/token"
+	case method == http.MethodPost && requestPath == "/api/v1/tunnels":
+		return "/api/v1/tunnels"
+	case method == http.MethodPost && requestPath == "/api/v1/sessions/lease":
+		return "/api/v1/sessions/lease"
+	case method == http.MethodDelete && strings.HasPrefix(requestPath, "/api/v1/tunnels/"):
+		return "/api/v1/tunnels/{tunnelId}"
+	default:
+		return requestPath
+	}
+}
+
+func mapAPIUserMessage(endpoint, code string) (string, bool) {
+	switch endpoint {
+	case "/api/v1/auth/cli/init":
+		if code == "UNSUPPORTED_CHALLENGE_METHOD" {
+			return "Error logging in, try again later", false
+		}
+
+	case "/api/v1/auth/cli/token":
+		switch code {
+		case "PKCE_VERIFICATION_FAILED", "REDIRECT_URI_MISMATCH":
+			return "Error logging in, verification failed", false
+		}
+
+	case "/api/v1/tunnels":
+		switch code {
+		case "UNSUPPORTED_PROTOCOL":
+			return "Protocol not supported", false
+		case "SUBDOMAIN_RESERVED":
+			return "Cannot issue the requested domain, try a different domain", false
+		case "SUBDOMAIN_TAKEN":
+			return "Domain is already taken, try a different domain", false
+		}
+
+	case "/api/v1/sessions/lease":
+		switch code {
+		case "TUNNEL_OWNERSHIP_DENIED":
+			return "Nice try..", false
+		case "TUNNEL_DELETED":
+			return "Tunnel not found", false
+		}
+
+	case "/api/v1/tunnels/{tunnelId}":
+		if code == "TUNNEL_NOT_FOUND" {
+			return "", true
+		}
+	}
+
+	return "", false
 }

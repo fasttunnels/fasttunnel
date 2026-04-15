@@ -50,16 +50,16 @@ func (s *Service) CreateAndRegister(subdomain, protocol string, localPort int, a
 
 	tun, err := s.client.CreateTunnel(subdomain, localPort, protocol, accessToken)
 	if err != nil {
-		return Lease{}, fmt.Errorf("create tunnel: %w", err)
+		return Lease{}, err
 	}
 
 	lease, err := s.client.CreateLease(tun.TunnelID, protocol, accessToken)
 	if err != nil {
-		return Lease{}, fmt.Errorf("create session lease: %w", err)
+		return Lease{}, err
 	}
 
 	if err := s.client.RegisterEdge(lease, tun.TunnelID, tun.Subdomain, protocol); err != nil {
-		return Lease{}, fmt.Errorf("register edge: %w", err)
+		return Lease{}, err
 	}
 
 	return Lease{

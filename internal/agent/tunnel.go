@@ -7,12 +7,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/fasttunnels/fasttunnel/internal/telemetry"
 	"github.com/gorilla/websocket"
 )
 
@@ -76,7 +77,7 @@ func RunAgentLoop(ctx context.Context, edgeHTTPURL, sessionToken string, localPo
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			log.Printf("agent disconnected: %v — reconnecting in %s", err, backoff)
+			// Silently retry with backoff
 		}
 
 		select {
@@ -103,18 +104,20 @@ func runOnce(ctx context.Context, wsURL, sessionToken string, localPort int) err
 
 	defer func() {
 		if err := conn.Close(); err != nil {
-			fmt.Printf("failed to close response connection: %v\n", err)
+			// Silently ignore close errors
 		}
 	}()
 
-	log.Printf("agent connected to %s", wsURL)
+	telemetry.LogInfo(fmt.Sprintf("connected to %s", wsURL))
+
+	var writeMu sync.Mutex
 
 	// conn.ReadMessage() is blocking and does not respect context cancellation.
 	// This goroutine watches for ctx cancellation and closes the connection,
 	// which causes ReadMessage to return immediately with an error.
 	go func() {
 		<-ctx.Done()
-		_ = conn.WriteMessage(
+		_ = writeJSON(conn, &writeMu,
 			websocket.CloseMessage,
 			websocket.FormatCloseMessage(websocket.CloseNormalClosure, "shutting down"),
 		)
@@ -143,25 +146,65 @@ func runOnce(ctx context.Context, wsURL, sessionToken string, localPort int) err
 		switch f.Type {
 		case framePing:
 			pongMsg, _ := json.Marshal(frame{Type: framePong})
-			_ = conn.WriteMessage(websocket.TextMessage, pongMsg)
+			_ = writeJSON(conn, &writeMu, websocket.TextMessage, pongMsg)
 		case frameHTTPRequest:
-			go handleHTTPRequest(ctx, conn, f, localPort)
+			go handleHTTPRequest(ctx, conn, &writeMu, f, localPort)
 		}
 	}
 }
 
 // handleHTTPRequest proxies a single tunnel HTTP request to the local app and
 // sends the response frame back over the WebSocket connection.
-func handleHTTPRequest(ctx context.Context, conn *websocket.Conn, req frame, localPort int) {
+func handleHTTPRequest(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, req frame, localPort int) {
+	start := time.Now()
+
+	// Log incoming request
+	telemetry.LogForwardStart(
+		"tunnel",
+		req.Method,
+		req.Path,
+		req.Query,
+		fmt.Sprintf("localhost:%d", localPort),
+	)
+
 	resp := forwardToLocal(ctx, req, localPort)
+	duration := time.Since(start)
+
+	// Log response result
+	if resp.Status >= 400 {
+		telemetry.LogForwardError(
+			"tunnel",
+			req.Method,
+			req.Path,
+			req.Query,
+			fmt.Sprintf("localhost:%d", localPort),
+			fmt.Sprintf("HTTP %d", resp.Status),
+		)
+	} else {
+		telemetry.LogResponse(
+			"tunnel",
+			req.Method,
+			req.Path,
+			req.Query,
+			resp.Status,
+			duration,
+		)
+	}
+
 	data, err := json.Marshal(resp)
 	if err != nil {
-		log.Printf("marshal response frame: %v", err)
+		// Silently skip if we can't marshal the response
 		return
 	}
-	if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
-		log.Printf("write response frame: %v", err)
+	if err := writeJSON(conn, writeMu, websocket.TextMessage, data); err != nil {
+		// Silently skip if we can't write the response
 	}
+}
+
+func writeJSON(conn *websocket.Conn, writeMu *sync.Mutex, messageType int, data []byte) error {
+	writeMu.Lock()
+	defer writeMu.Unlock()
+	return conn.WriteMessage(messageType, data)
 }
 
 // forwardToLocal sends the tunnel request to localhost:localPort and returns the response frame.
@@ -204,13 +247,12 @@ func forwardToLocal(ctx context.Context, req frame, localPort int) frame {
 	client := &http.Client{Timeout: 25 * time.Second}
 	httpResp, err := client.Do(httpReq)
 	if err != nil {
-		log.Printf("local forward error: %v", err)
 		return errorFrame(req.RequestID, http.StatusBadGateway, "local app unreachable")
 	}
 
 	defer func() {
 		if err := httpResp.Body.Close(); err != nil {
-			fmt.Printf("failed to close response body: %v\n", err)
+			// Silently ignore errors closing response body
 		}
 	}()
 

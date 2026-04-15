@@ -6,12 +6,12 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"os"
 
 	"github.com/fasttunnels/fasttunnel/internal/agent"
 	"github.com/fasttunnels/fasttunnel/internal/cmdparse"
 	"github.com/fasttunnels/fasttunnel/internal/commands"
+	"github.com/fasttunnels/fasttunnel/internal/telemetry"
 	"github.com/fasttunnels/fasttunnel/internal/tunnel"
 )
 
@@ -35,21 +35,33 @@ func main() {
 		os.Exit(1)
 	}
 
-	// ── Compose dependencies ──────────────────────────────────────────────────
-	client := agent.NewClient()
+	telemetry.SetMode(version)
+
+	client := agent.NewClient(version)
 	svc := tunnel.New(client)
 
-	// ── Dispatch ──────────────────────────────────────────────────────────────
 	switch parsed.Name {
 	case cmdparse.CmdVersion:
 		commands.RunVersion(version, commit, buildDate)
 	case cmdparse.CmdLogin:
 		if err := commands.RunLogin(client, parsed.Login); err != nil {
-			log.Fatal(err)
+			apiErr, ok := err.(*telemetry.APIError)
+			if ok {
+				telemetry.LogError(apiErr.UserMsg, apiErr.Error())
+			} else {
+				telemetry.LogError(err.Error(), "")
+			}
+			os.Exit(1)
 		}
 	case cmdparse.CmdHTTP, cmdparse.CmdHTTPS:
 		if err := commands.RunHTTP(svc, parsed.Tunnel); err != nil {
-			log.Fatal(err)
+			apiErr, ok := err.(*telemetry.APIError)
+			if ok {
+				telemetry.LogError(apiErr.UserMsg, apiErr.Error())
+			} else {
+				telemetry.LogError(err.Error(), "")
+			}
+			os.Exit(1)
 		}
 	default:
 		fmt.Fprintf(os.Stderr, "unhandled command %q\n", parsed.Name)
