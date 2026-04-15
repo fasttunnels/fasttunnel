@@ -2,7 +2,7 @@ package cmdparse
 
 import "flag"
 
-const defaultCallbackPort = 43001
+const defaultCallbackPort = 0
 
 // parseLogin resolves arguments for the login subcommand.
 //

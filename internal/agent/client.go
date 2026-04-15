@@ -147,7 +147,13 @@ func (c *Client) DeleteTunnel(tunnelID, accessToken string) error {
 	if err != nil {
 		return fmt.Errorf("request failed: %w", err)
 	}
-	defer resp.Body.Close()
+
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			fmt.Printf("failed to close response body: %v\n", err)
+		}
+	}()
+
 	if resp.StatusCode >= 400 {
 		raw, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("api error (%d): %s", resp.StatusCode, string(raw))
@@ -184,7 +190,11 @@ func (c *Client) postJSON(url string, payload any, token string, out any) error 
 	if err != nil {
 		return fmt.Errorf("request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			fmt.Printf("failed to close response body: %v\n", err)
+		}
+	}()
 
 	if resp.StatusCode >= 400 {
 		raw, _ := io.ReadAll(resp.Body)

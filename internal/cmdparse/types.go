@@ -58,6 +58,6 @@ type Tunnel struct {
 // Login holds the normalised arguments for the login command.
 type Login struct {
 	// CallbackPort is the ephemeral local HTTP server port used for the
-	// OAuth 2.0 PKCE redirect.  Defaults to 43001.
+	// OAuth 2.0 PKCE redirect.  Defaults to 0 (OS-assigned free port).
 	CallbackPort int
 }

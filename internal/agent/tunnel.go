@@ -100,7 +100,12 @@ func runOnce(ctx context.Context, wsURL, sessionToken string, localPort int) err
 	if err != nil {
 		return fmt.Errorf("dial %s: %w", wsURL, err)
 	}
-	defer conn.Close()
+
+	defer func() {
+		if err := conn.Close(); err != nil {
+			fmt.Printf("failed to close response connection: %v\n", err)
+		}
+	}()
 
 	log.Printf("agent connected to %s", wsURL)
 
@@ -113,7 +118,11 @@ func runOnce(ctx context.Context, wsURL, sessionToken string, localPort int) err
 			websocket.CloseMessage,
 			websocket.FormatCloseMessage(websocket.CloseNormalClosure, "shutting down"),
 		)
-		conn.Close()
+		func() {
+			if err := conn.Close(); err != nil {
+				fmt.Printf("failed to close response connection: %v\n", err)
+			}
+		}()
 	}()
 
 	for {
@@ -198,7 +207,12 @@ func forwardToLocal(ctx context.Context, req frame, localPort int) frame {
 		log.Printf("local forward error: %v", err)
 		return errorFrame(req.RequestID, http.StatusBadGateway, "local app unreachable")
 	}
-	defer httpResp.Body.Close()
+
+	defer func() {
+		if err := httpResp.Body.Close(); err != nil {
+			fmt.Printf("failed to close response body: %v\n", err)
+		}
+	}()
 
 	// Read response body; cap at 16 MiB.
 	respBody, err := io.ReadAll(io.LimitReader(httpResp.Body, 16*1024*1024))
