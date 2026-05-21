@@ -31,6 +31,16 @@ const (
 	// frameHTTPResponse is sent by the CLI agent back to the edge after it has
 	// proxied the request to the local application.
 	frameHTTPResponse = "http_response"
+	// frameWSOpen asks the agent to open a websocket stream to the local app.
+	frameWSOpen = "ws_open"
+	// frameWSOpenAck confirms whether opening a websocket stream succeeded.
+	frameWSOpenAck = "ws_open_ack"
+	// frameWSData carries websocket payloads.
+	frameWSData = "ws_data"
+	// frameWSClose carries websocket close metadata.
+	frameWSClose = "ws_close"
+	// frameWSError carries stream-level websocket errors.
+	frameWSError = "ws_error"
 )
 
 // frame is the envelope for every message crossing the WebSocket connection.
@@ -40,6 +50,8 @@ type frame struct {
 
 	// RequestID ties an http_request frame to its http_response.
 	RequestID string `json:"request_id,omitempty"`
+	// StreamID ties websocket frames to a single bidirectional ws stream.
+	StreamID string `json:"stream_id,omitempty"`
 
 	// ── HTTP request fields (edge -> CLI) ────────────────────────────────────
 
@@ -49,10 +61,76 @@ type frame struct {
 	Headers map[string][]string `json:"headers,omitempty"`
 	// Body carries the request or response body as a base64-encoded string.
 	Body string `json:"body,omitempty"`
+	// MessageType carries websocket message type constants for ws_data.
+	MessageType int `json:"message_type,omitempty"`
 
 	// ── HTTP response fields (CLI -> edge) ───────────────────────────────────
 
 	Status int `json:"status,omitempty"`
+
+	// OK marks a successful ws_open_ack.
+	OK bool `json:"ok,omitempty"`
+	// Error carries stream-level websocket errors.
+	Error string `json:"error,omitempty"`
+	// CloseCode carries websocket close status code for ws_close.
+	CloseCode int `json:"close_code,omitempty"`
+	// CloseReason carries websocket close reason text for ws_close.
+	CloseReason string `json:"close_reason,omitempty"`
+	// Subprotocol carries selected websocket subprotocol for ws_open_ack.
+	Subprotocol string `json:"subprotocol,omitempty"`
+}
+
+type localWSStream struct {
+	conn    *websocket.Conn
+	writeMu sync.Mutex
+}
+
+type wsStreamRegistry struct {
+	mu      sync.RWMutex
+	streams map[string]*localWSStream
+}
+
+func newWSStreamRegistry() *wsStreamRegistry {
+	return &wsStreamRegistry{streams: make(map[string]*localWSStream)}
+}
+
+func (r *wsStreamRegistry) set(streamID string, stream *localWSStream) {
+	r.mu.Lock()
+	old := r.streams[streamID]
+	r.streams[streamID] = stream
+	r.mu.Unlock()
+
+	if old != nil {
+		_ = old.conn.Close()
+	}
+}
+
+func (r *wsStreamRegistry) get(streamID string) (*localWSStream, bool) {
+	r.mu.RLock()
+	stream, ok := r.streams[streamID]
+	r.mu.RUnlock()
+	return stream, ok
+}
+
+func (r *wsStreamRegistry) remove(streamID string) (*localWSStream, bool) {
+	r.mu.Lock()
+	stream, ok := r.streams[streamID]
+	if ok {
+		delete(r.streams, streamID)
+	}
+	r.mu.Unlock()
+	return stream, ok
+}
+
+func (r *wsStreamRegistry) closeAll() {
+	r.mu.Lock()
+	streams := r.streams
+	r.streams = make(map[string]*localWSStream)
+	r.mu.Unlock()
+
+	for _, stream := range streams {
+		_ = stream.conn.Close()
+	}
 }
 
 // ── Agent loop ────────────────────────────────────────────────────────────────
@@ -110,6 +188,9 @@ func runOnce(ctx context.Context, wsURL, sessionToken string, localPort int) err
 		}
 	}()
 
+	streams := newWSStreamRegistry()
+	defer streams.closeAll()
+
 	telemetry.LogInfo(fmt.Sprintf("connected to %s", wsURL))
 
 	var writeMu sync.Mutex
@@ -151,6 +232,12 @@ func runOnce(ctx context.Context, wsURL, sessionToken string, localPort int) err
 			_ = writeJSON(conn, &writeMu, websocket.TextMessage, pongMsg)
 		case frameHTTPRequest:
 			go handleHTTPRequest(ctx, conn, &writeMu, f, localPort)
+		case frameWSOpen:
+			go handleWebSocketOpen(ctx, conn, &writeMu, f, localPort, streams)
+		case frameWSData:
+			handleWebSocketData(conn, &writeMu, f, streams)
+		case frameWSClose, frameWSError:
+			handleWebSocketClose(f, streams)
 		}
 	}
 }
@@ -208,6 +295,186 @@ func writeJSON(conn *websocket.Conn, writeMu *sync.Mutex, messageType int, data 
 	writeMu.Lock()
 	defer writeMu.Unlock()
 	return conn.WriteMessage(messageType, data)
+}
+
+func writeFrame(conn *websocket.Conn, writeMu *sync.Mutex, f frame) error {
+	data, err := json.Marshal(f)
+	if err != nil {
+		return err
+	}
+	return writeJSON(conn, writeMu, websocket.TextMessage, data)
+}
+
+func handleWebSocketOpen(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, req frame, localPort int, streams *wsStreamRegistry) {
+	if req.StreamID == "" {
+		return
+	}
+
+	path := req.Path
+	if path == "" {
+		path = "/"
+	}
+
+	targetURL := fmt.Sprintf("ws://localhost:%d%s", localPort, path)
+	if req.Query != "" {
+		targetURL += "?" + req.Query
+	}
+
+	headers := cloneWebSocketHeaders(req.Headers)
+	originalHost := firstHeaderValue(req.Headers, "Host")
+	if rewrittenOrigin, ok := rewriteOriginForLocal(headers.Get("Origin"), originalHost, localPort); ok {
+		headers.Set("Origin", rewrittenOrigin)
+	}
+
+	dialer := websocket.Dialer{HandshakeTimeout: 10 * time.Second}
+	localConn, resp, err := dialer.DialContext(ctx, targetURL, headers)
+	if err != nil {
+		reason := "local websocket unreachable"
+		if resp != nil {
+			reason = fmt.Sprintf("local websocket handshake failed: HTTP %d", resp.StatusCode)
+		}
+		_ = writeFrame(conn, writeMu, frame{
+			Type:     frameWSOpenAck,
+			StreamID: req.StreamID,
+			OK:       false,
+			Error:    reason,
+		})
+		return
+	}
+
+	streams.set(req.StreamID, &localWSStream{conn: localConn})
+
+	if err := writeFrame(conn, writeMu, frame{
+		Type:        frameWSOpenAck,
+		StreamID:    req.StreamID,
+		OK:          true,
+		Subprotocol: localConn.Subprotocol(),
+	}); err != nil {
+		if stream, ok := streams.remove(req.StreamID); ok {
+			_ = stream.conn.Close()
+		}
+		return
+	}
+
+	go pumpLocalToEdge(conn, writeMu, req.StreamID, localConn, streams)
+}
+
+func handleWebSocketData(conn *websocket.Conn, writeMu *sync.Mutex, f frame, streams *wsStreamRegistry) {
+	stream, ok := streams.get(f.StreamID)
+	if !ok {
+		return
+	}
+
+	payload, err := base64.StdEncoding.DecodeString(f.Body)
+	if err != nil {
+		_ = writeFrame(conn, writeMu, frame{
+			Type:     frameWSError,
+			StreamID: f.StreamID,
+			Error:    "invalid ws payload encoding",
+		})
+		return
+	}
+
+	messageType := f.MessageType
+	if messageType == 0 {
+		messageType = websocket.TextMessage
+	}
+
+	stream.writeMu.Lock()
+	err = stream.conn.WriteMessage(messageType, payload)
+	stream.writeMu.Unlock()
+	if err != nil {
+		if removed, ok := streams.remove(f.StreamID); ok {
+			_ = removed.conn.Close()
+		}
+		_ = writeFrame(conn, writeMu, frame{
+			Type:      frameWSClose,
+			StreamID:  f.StreamID,
+			CloseCode: websocket.CloseAbnormalClosure,
+			Error:     "failed writing to local websocket",
+		})
+	}
+}
+
+func handleWebSocketClose(f frame, streams *wsStreamRegistry) {
+	stream, ok := streams.remove(f.StreamID)
+	if !ok {
+		return
+	}
+
+	closeCode := f.CloseCode
+	if closeCode == 0 {
+		closeCode = websocket.CloseNormalClosure
+	}
+
+	_ = stream.conn.WriteControl(
+		websocket.CloseMessage,
+		websocket.FormatCloseMessage(closeCode, f.CloseReason),
+		time.Now().Add(2*time.Second),
+	)
+	_ = stream.conn.Close()
+}
+
+func pumpLocalToEdge(conn *websocket.Conn, writeMu *sync.Mutex, streamID string, localConn *websocket.Conn, streams *wsStreamRegistry) {
+	defer func() {
+		if stream, ok := streams.remove(streamID); ok {
+			_ = stream.conn.Close()
+		}
+	}()
+
+	for {
+		messageType, payload, err := localConn.ReadMessage()
+		if err != nil {
+			closeCode := websocket.CloseNormalClosure
+			closeReason := "normal closure"
+
+			if ce, ok := err.(*websocket.CloseError); ok {
+				closeCode = ce.Code
+				if ce.Text != "" {
+					closeReason = ce.Text
+				}
+			}
+
+			_ = writeFrame(conn, writeMu, frame{
+				Type:        frameWSClose,
+				StreamID:    streamID,
+				CloseCode:   closeCode,
+				CloseReason: closeReason,
+			})
+			return
+		}
+
+		if messageType != websocket.TextMessage && messageType != websocket.BinaryMessage {
+			continue
+		}
+
+		if err := writeFrame(conn, writeMu, frame{
+			Type:        frameWSData,
+			StreamID:    streamID,
+			MessageType: messageType,
+			Body:        base64.StdEncoding.EncodeToString(payload),
+		}); err != nil {
+			return
+		}
+	}
+}
+
+func cloneWebSocketHeaders(headers map[string][]string) http.Header {
+	cloned := make(http.Header)
+	for key, vals := range headers {
+		if strings.EqualFold(key, "Host") ||
+			strings.EqualFold(key, "Connection") ||
+			strings.EqualFold(key, "Upgrade") ||
+			strings.EqualFold(key, "Sec-WebSocket-Key") ||
+			strings.EqualFold(key, "Sec-WebSocket-Version") {
+			continue
+		}
+
+		for _, v := range vals {
+			cloned.Add(key, v)
+		}
+	}
+	return cloned
 }
 
 // forwardToLocal sends the tunnel request to localhost:localPort and returns the response frame.
