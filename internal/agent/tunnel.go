@@ -310,6 +310,10 @@ func handleWebSocketOpen(ctx context.Context, conn *websocket.Conn, writeMu *syn
 		return
 	}
 
+	start := time.Now()
+	localTarget := fmt.Sprintf("localhost:%d", localPort)
+	telemetry.LogForwardStart("tunnel", req.Method, req.Path, req.Query, localTarget)
+
 	path := req.Path
 	if path == "" {
 		path = "/"
@@ -325,14 +329,16 @@ func handleWebSocketOpen(ctx context.Context, conn *websocket.Conn, writeMu *syn
 	if rewrittenOrigin, ok := rewriteOriginForLocal(headers.Get("Origin"), originalHost, localPort); ok {
 		headers.Set("Origin", rewrittenOrigin)
 	}
+	subprotocols := requestedWebSocketSubprotocols(req.Headers)
 
-	dialer := websocket.Dialer{HandshakeTimeout: 10 * time.Second}
+	dialer := websocket.Dialer{
+		HandshakeTimeout: 10 * time.Second,
+		Subprotocols:     subprotocols,
+	}
 	localConn, resp, err := dialer.DialContext(ctx, targetURL, headers)
 	if err != nil {
-		reason := "local websocket unreachable"
-		if resp != nil {
-			reason = fmt.Sprintf("local websocket handshake failed: HTTP %d", resp.StatusCode)
-		}
+		reason := formatLocalWSError(err, resp)
+		telemetry.LogForwardError("tunnel", req.Method, req.Path, req.Query, localTarget, reason)
 		_ = writeFrame(conn, writeMu, frame{
 			Type:     frameWSOpenAck,
 			StreamID: req.StreamID,
@@ -343,6 +349,7 @@ func handleWebSocketOpen(ctx context.Context, conn *websocket.Conn, writeMu *syn
 	}
 
 	streams.set(req.StreamID, &localWSStream{conn: localConn})
+	telemetry.LogResponse("tunnel", req.Method, req.Path, req.Query, http.StatusSwitchingProtocols, time.Since(start))
 
 	if err := writeFrame(conn, writeMu, frame{
 		Type:        frameWSOpenAck,
@@ -357,6 +364,30 @@ func handleWebSocketOpen(ctx context.Context, conn *websocket.Conn, writeMu *syn
 	}
 
 	go pumpLocalToEdge(conn, writeMu, req.StreamID, localConn, streams)
+}
+
+func formatLocalWSError(err error, resp *http.Response) string {
+	if resp == nil {
+		return fmt.Sprintf("local websocket unreachable: %v", err)
+	}
+
+	bodySnippet := ""
+	if resp.Body != nil {
+		defer func() { _ = resp.Body.Close() }()
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 256))
+		if readErr == nil {
+			bodySnippet = strings.Join(strings.Fields(string(body)), " ")
+			if len(bodySnippet) > 120 {
+				bodySnippet = bodySnippet[:120] + "..."
+			}
+		}
+	}
+
+	if bodySnippet != "" {
+		return fmt.Sprintf("local websocket handshake failed: HTTP %d (%v) body=%q", resp.StatusCode, err, bodySnippet)
+	}
+
+	return fmt.Sprintf("local websocket handshake failed: HTTP %d (%v)", resp.StatusCode, err)
 }
 
 func handleWebSocketData(conn *websocket.Conn, writeMu *sync.Mutex, f frame, streams *wsStreamRegistry) {
@@ -466,7 +497,9 @@ func cloneWebSocketHeaders(headers map[string][]string) http.Header {
 			strings.EqualFold(key, "Connection") ||
 			strings.EqualFold(key, "Upgrade") ||
 			strings.EqualFold(key, "Sec-WebSocket-Key") ||
-			strings.EqualFold(key, "Sec-WebSocket-Version") {
+			strings.EqualFold(key, "Sec-WebSocket-Version") ||
+			strings.EqualFold(key, "Sec-WebSocket-Extensions") ||
+			strings.EqualFold(key, "Sec-WebSocket-Protocol") {
 			continue
 		}
 
@@ -475,6 +508,32 @@ func cloneWebSocketHeaders(headers map[string][]string) http.Header {
 		}
 	}
 	return cloned
+}
+
+func requestedWebSocketSubprotocols(headers map[string][]string) []string {
+	seen := make(map[string]struct{})
+	var protocols []string
+
+	for key, values := range headers {
+		if !strings.EqualFold(key, "Sec-WebSocket-Protocol") {
+			continue
+		}
+		for _, raw := range values {
+			for _, token := range strings.Split(raw, ",") {
+				protocol := strings.TrimSpace(token)
+				if protocol == "" {
+					continue
+				}
+				if _, ok := seen[protocol]; ok {
+					continue
+				}
+				seen[protocol] = struct{}{}
+				protocols = append(protocols, protocol)
+			}
+		}
+	}
+
+	return protocols
 }
 
 // forwardToLocal sends the tunnel request to localhost:localPort and returns the response frame.

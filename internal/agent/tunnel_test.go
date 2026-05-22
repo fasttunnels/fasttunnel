@@ -7,14 +7,15 @@ import (
 
 func TestCloneWebSocketHeaders(t *testing.T) {
 	in := map[string][]string{
-		"Host":                   {"abc.fasttunnel.dev"},
-		"Connection":             {"Upgrade"},
-		"Upgrade":                {"websocket"},
-		"Sec-WebSocket-Key":      {"abc"},
-		"Sec-WebSocket-Version":  {"13"},
-		"Sec-WebSocket-Protocol": {"hmr"},
-		"Origin":                 {"https://abc.fasttunnel.dev"},
-		"Cookie":                 {"session=123"},
+		"Host":                     {"abc.fasttunnel.dev"},
+		"Connection":               {"Upgrade"},
+		"Upgrade":                  {"websocket"},
+		"Sec-WebSocket-Key":        {"abc"},
+		"Sec-WebSocket-Version":    {"13"},
+		"Sec-WebSocket-Extensions": {"permessage-deflate; client_max_window_bits"},
+		"Sec-WebSocket-Protocol":   {"hmr"},
+		"Origin":                   {"https://abc.fasttunnel.dev"},
+		"Cookie":                   {"session=123"},
 	}
 
 	out := cloneWebSocketHeaders(in)
@@ -34,8 +35,11 @@ func TestCloneWebSocketHeaders(t *testing.T) {
 	if out.Get("Sec-WebSocket-Version") != "" {
 		t.Fatal("expected Sec-WebSocket-Version to be stripped")
 	}
-	if out.Get("Sec-WebSocket-Protocol") != "hmr" {
-		t.Fatal("expected Sec-WebSocket-Protocol to be preserved")
+	if out.Get("Sec-WebSocket-Extensions") != "" {
+		t.Fatal("expected Sec-WebSocket-Extensions to be stripped")
+	}
+	if out.Get("Sec-WebSocket-Protocol") != "" {
+		t.Fatal("expected Sec-WebSocket-Protocol to be stripped")
 	}
 	if out.Get("Origin") != "https://abc.fasttunnel.dev" {
 		t.Fatal("expected Origin to be preserved")
@@ -82,4 +86,18 @@ func TestCloneWebSocketHeadersReturnsHeaderMap(t *testing.T) {
 
 	// Ensure the returned type is http.Header.
 	_ = http.Header(out)
+}
+
+func TestRequestedWebSocketSubprotocols(t *testing.T) {
+	in := map[string][]string{
+		"Sec-WebSocket-Protocol": {"hmr, turbo", "hmr", " nextjs "},
+	}
+
+	got := requestedWebSocketSubprotocols(in)
+	if len(got) != 3 {
+		t.Fatalf("expected 3 subprotocols, got %d (%v)", len(got), got)
+	}
+	if got[0] != "hmr" || got[1] != "turbo" || got[2] != "nextjs" {
+		t.Fatalf("unexpected subprotocol order/content: %v", got)
+	}
 }
