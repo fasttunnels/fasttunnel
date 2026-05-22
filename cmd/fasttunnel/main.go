@@ -20,12 +20,14 @@ import (
 //	-X main.version=v1.2.3
 //	-X main.commit=abc1234
 //	-X main.buildDate=2026-04-14
+//	-X main.buildChannel=prod
 //
 // A plain `go build` without ldflags leaves these as "dev".
 var (
-	version   = "dev"
-	commit    = "none"
-	buildDate = "unknown"
+	version      = "dev"
+	commit       = "none"
+	buildDate    = "unknown"
+	buildChannel = "dev"
 )
 
 func main() {
@@ -35,7 +37,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	telemetry.SetMode(version)
+	telemetry.SetMode(buildChannel)
 
 	client := agent.NewClient(version)
 	svc := tunnel.New(client)

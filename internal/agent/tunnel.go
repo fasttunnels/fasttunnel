@@ -259,26 +259,15 @@ func handleHTTPRequest(ctx context.Context, conn *websocket.Conn, writeMu *sync.
 	resp := forwardToLocal(ctx, req, localPort)
 	duration := time.Since(start)
 
-	// Log response result
-	if resp.Status >= 400 {
-		telemetry.LogForwardError(
-			"tunnel",
-			req.Method,
-			req.Path,
-			req.Query,
-			fmt.Sprintf("localhost:%d", localPort),
-			fmt.Sprintf("HTTP %d", resp.Status),
-		)
-	} else {
-		telemetry.LogResponse(
-			"tunnel",
-			req.Method,
-			req.Path,
-			req.Query,
-			resp.Status,
-			duration,
-		)
-	}
+	// Always emit a response log line; status formatting is handled by telemetry.
+	telemetry.LogResponse(
+		"tunnel",
+		req.Method,
+		req.Path,
+		req.Query,
+		resp.Status,
+		duration,
+	)
 
 	data, err := json.Marshal(resp)
 	if err != nil {

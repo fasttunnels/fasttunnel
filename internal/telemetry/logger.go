@@ -4,6 +4,8 @@ package telemetry
 
 import (
 	"fmt"
+	"net/http"
+	"os"
 	"strings"
 	"time"
 )
@@ -34,9 +36,37 @@ type APIError struct {
 // mode controls whether to log full context (dev) or only user messages (prod).
 var mode string = "dev"
 
-// SetMode sets the logging mode: "dev" for development, anything else for production.
-func SetMode(m string) {
-	mode = m
+// SetMode resolves logging mode from runtime overrides and build channel.
+// Precedence: FASTTUNNEL_LOG_MODE -> FASTTUNNEL_MODE -> build channel.
+func SetMode(buildChannel string) {
+	mode = resolveMode(buildChannel)
+}
+
+func resolveMode(buildChannel string) string {
+	if override := normalizeMode(os.Getenv("FASTTUNNEL_LOG_MODE")); override != "" {
+		return override
+	}
+	if override := normalizeMode(os.Getenv("FASTTUNNEL_MODE")); override != "" {
+		return override
+	}
+	if normalized := normalizeMode(buildChannel); normalized != "" {
+		return normalized
+	}
+	return "dev"
+}
+
+func normalizeMode(v string) string {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "":
+		return ""
+	case "dev", "development", "local", "debug":
+		return "dev"
+	case "prod", "production", "release", "stable":
+		return "prod"
+	default:
+		// Any non-dev build channel (including semantic versions) is treated as production.
+		return "prod"
+	}
 }
 
 // isDev returns true if we're in development mode.
@@ -161,6 +191,12 @@ func LogResponse(domain, method, path, query string, status int, duration time.D
 	if query != "" {
 		path = path + "?" + query
 	}
+
+	if !isDev() {
+		fmt.Println(formatProdReqResLine(method, path, status))
+		return
+	}
+
 	path = TruncatePath(path, 60)
 
 	fmt.Printf(
@@ -179,6 +215,9 @@ func LogForwardStart(domain, method, path, query, localTarget string) {
 	if query != "" {
 		path = path + "?" + query
 	}
+	if !isDev() {
+		return
+	}
 	path = TruncatePath(path, 50)
 	fmt.Printf(
 		"%s %s %s → %s%s %s\n",
@@ -195,6 +234,10 @@ func LogForwardStart(domain, method, path, query, localTarget string) {
 func LogForwardError(domain, method, path, query, localTarget, errMsg string) {
 	if query != "" {
 		path = path + "?" + query
+	}
+	if !isDev() {
+		fmt.Printf("%s\n", ColorError(fmt.Sprintf("%s %s: %s", strings.ToUpper(method), path, errMsg)))
+		return
 	}
 	path = TruncatePath(path, 50)
 	fmt.Printf(
@@ -305,4 +348,22 @@ func SilentLogProdError(err error) {
 			LogError(err.Error(), "")
 		}
 	}
+}
+
+func formatProdReqResLine(method, path string, status int) string {
+	path = TruncatePath(path, 100)
+	statusText := http.StatusText(status)
+	if statusText == "" {
+		statusText = "Unknown"
+	}
+	now := time.Now()
+	return fmt.Sprintf(
+		"%s %s %-6s %-80s %3d %s",
+		now.Format("15:04:05.000"),
+		now.Format("MST"),
+		strings.ToUpper(method),
+		path,
+		status,
+		statusText,
+	)
 }
