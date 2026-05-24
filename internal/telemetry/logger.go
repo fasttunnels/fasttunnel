@@ -1,5 +1,5 @@
 // Package telemetry provides mode-aware logging: dev mode logs full context with timestamps,
-// production mode logs only user-facing messages without timestamps.
+
 package telemetry
 
 import (
@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -30,25 +31,49 @@ type APIError struct {
 	Code       string
 	Detail     string
 	UserMsg    string
+	ActionHint string
 	Silent     bool
 }
 
 // mode controls whether to log full context (dev) or only user messages (prod).
-var mode string = "dev"
+var (
+	mode   = "dev"
+	modeMu sync.RWMutex
+)
 
 // SetMode resolves logging mode from runtime overrides and build channel.
 // Precedence: FASTTUNNEL_LOG_MODE -> FASTTUNNEL_MODE -> build channel.
 func SetMode(buildChannel string) {
-	mode = resolveMode(buildChannel)
+	SetModeWithVersion(buildChannel, "")
 }
 
-func resolveMode(buildChannel string) string {
+// SetModeWithVersion resolves logging mode with backward compatibility for
+// release binaries built before buildChannel ldflags were introduced.
+func SetModeWithVersion(buildChannel, version string) {
+	resolved := resolveMode(buildChannel, version)
+	modeMu.Lock()
+	mode = resolved
+	modeMu.Unlock()
+	resetProdSinkForMode(resolved)
+}
+
+func resolveMode(buildChannel, version string) string {
 	if override := normalizeMode(os.Getenv("FASTTUNNEL_LOG_MODE")); override != "" {
 		return override
 	}
 	if override := normalizeMode(os.Getenv("FASTTUNNEL_MODE")); override != "" {
 		return override
 	}
+
+	// Backward compatibility: pre-buildChannel release binaries still have
+	// semantic version strings. Treat them as production by default.
+	if normalizeMode(buildChannel) == "dev" {
+		v := strings.TrimSpace(strings.ToLower(version))
+		if v != "" && v != "dev" {
+			return "prod"
+		}
+	}
+
 	if normalized := normalizeMode(buildChannel); normalized != "" {
 		return normalized
 	}
@@ -71,6 +96,8 @@ func normalizeMode(v string) string {
 
 // isDev returns true if we're in development mode.
 func isDev() bool {
+	modeMu.RLock()
+	defer modeMu.RUnlock()
 	return mode == "dev"
 }
 
@@ -174,6 +201,15 @@ func LogRequest(domain, method, path, query string) {
 	if query != "" {
 		path = path + "?" + query
 	}
+	if !isDev() {
+		emitProdFileEvent(fileLogEvent{
+			Category: "request_pending",
+			Domain:   domain,
+			Method:   strings.ToUpper(method),
+			Path:     path,
+		})
+		return
+	}
 	path = TruncatePath(path, 60)
 
 	fmt.Printf(
@@ -193,6 +229,14 @@ func LogResponse(domain, method, path, query string, status int, duration time.D
 	}
 
 	if !isDev() {
+		emitProdFileEvent(fileLogEvent{
+			Category:   "request_complete",
+			Domain:     domain,
+			Method:     strings.ToUpper(method),
+			Path:       path,
+			Status:     status,
+			DurationMS: duration.Milliseconds(),
+		})
 		fmt.Println(formatProdReqResLine(method, path, status))
 		return
 	}
@@ -216,6 +260,13 @@ func LogForwardStart(domain, method, path, query, localTarget string) {
 		path = path + "?" + query
 	}
 	if !isDev() {
+		emitProdFileEvent(fileLogEvent{
+			Category: "forward_start",
+			Domain:   domain,
+			Method:   strings.ToUpper(method),
+			Path:     path,
+			Target:   localTarget,
+		})
 		return
 	}
 	path = TruncatePath(path, 50)
@@ -236,7 +287,14 @@ func LogForwardError(domain, method, path, query, localTarget, errMsg string) {
 		path = path + "?" + query
 	}
 	if !isDev() {
-		fmt.Printf("%s\n", ColorError(fmt.Sprintf("%s %s: %s", strings.ToUpper(method), path, errMsg)))
+		emitProdFileEvent(fileLogEvent{
+			Category: "forward_error",
+			Domain:   domain,
+			Method:   strings.ToUpper(method),
+			Path:     path,
+			Target:   localTarget,
+			Error:    errMsg,
+		})
 		return
 	}
 	path = TruncatePath(path, 50)
@@ -256,6 +314,15 @@ func LogEdgeForward(domain, method, path, query string) {
 	if query != "" {
 		path = path + "?" + query
 	}
+	if !isDev() {
+		emitProdFileEvent(fileLogEvent{
+			Category: "edge_forward",
+			Domain:   domain,
+			Method:   strings.ToUpper(method),
+			Path:     path,
+		})
+		return
+	}
 	path = TruncatePath(path, 60)
 	fmt.Printf(
 		"%s %s %s %s %s\n",
@@ -272,6 +339,17 @@ func LogEdgeResponse(domain, method, path, query string, status int, duration ti
 	if query != "" {
 		path = path + "?" + query
 	}
+	if !isDev() {
+		emitProdFileEvent(fileLogEvent{
+			Category:   "edge_response",
+			Domain:     domain,
+			Method:     strings.ToUpper(method),
+			Path:       path,
+			Status:     status,
+			DurationMS: duration.Milliseconds(),
+		})
+		return
+	}
 	path = TruncatePath(path, 60)
 	fmt.Printf(
 		"%s %s %s %s %s %s\n",
@@ -286,6 +364,14 @@ func LogEdgeResponse(domain, method, path, query string, status int, duration ti
 
 // LogAgentDisconnect logs when an agent disconnects.
 func LogAgentDisconnect(domain, reason string) {
+	if !isDev() {
+		emitProdFileEvent(fileLogEvent{
+			Category: "agent_disconnect",
+			Domain:   domain,
+			Message:  reason,
+		})
+		return
+	}
 	fmt.Printf(
 		"%s %s %s\n",
 		colorYellow+"[DISCO]"+colorReset,
@@ -296,6 +382,13 @@ func LogAgentDisconnect(domain, reason string) {
 
 // LogAgentConnect logs when an agent connects.
 func LogAgentConnect(domain string) {
+	if !isDev() {
+		emitProdFileEvent(fileLogEvent{
+			Category: "agent_connect",
+			Domain:   domain,
+		})
+		return
+	}
 	fmt.Printf(
 		"%s %s %s\n",
 		colorGreen+"[CONN]"+colorReset,
@@ -309,6 +402,7 @@ func LogInfo(msg string) {
 	if isDev() {
 		fmt.Printf("[INFO] %s\n", msg)
 	} else {
+		emitProdFileEvent(fileLogEvent{Category: "info", Message: msg})
 		fmt.Printf("%s\n", msg)
 	}
 }
@@ -323,11 +417,41 @@ func LogError(userMsg, context string) {
 			fmt.Printf("[ERROR] %s\n", userMsg)
 		}
 	} else {
+		emitProdFileEvent(fileLogEvent{Category: "user_error", Message: userMsg, Error: context})
 		fmt.Printf("%s\n", ColorError(userMsg))
 	}
 }
 
-func BuildAPIError(method, endpoint string, statusCode int, code string, detail string, userMsg string, silent bool) *APIError {
+// LogAPIError prints an API error with user guidance.
+func LogAPIError(apiErr *APIError) {
+	if apiErr == nil {
+		return
+	}
+
+	if isDev() {
+		LogError(apiErr.UserMsg, apiErr.Error())
+		if apiErr.ActionHint != "" {
+			fmt.Printf("[HINT] %s\n", apiErr.ActionHint)
+		}
+		return
+	}
+
+	emitProdFileEvent(fileLogEvent{
+		Category: "api_error",
+		Message:  apiErr.UserMsg,
+		Error:    apiErr.Error(),
+		Endpoint: apiErr.Endpoint,
+		Code:     apiErr.Code,
+		Action:   apiErr.ActionHint,
+	})
+
+	fmt.Printf("%s\n", ColorError(apiErr.UserMsg))
+	if apiErr.ActionHint != "" {
+		fmt.Printf("%s %s\n", colorCyan+"→"+colorReset, colorYellow+apiErr.ActionHint+colorReset)
+	}
+}
+
+func BuildAPIError(method, endpoint string, statusCode int, code string, detail string, userMsg string, actionHint string, silent bool) *APIError {
 	return &APIError{
 		Method:     method,
 		Endpoint:   endpoint,
@@ -335,6 +459,7 @@ func BuildAPIError(method, endpoint string, statusCode int, code string, detail 
 		Code:       code,
 		Detail:     detail,
 		UserMsg:    userMsg,
+		ActionHint: actionHint,
 		Silent:     silent,
 	}
 }
@@ -347,7 +472,15 @@ func SilentLogProdError(err error) {
 		} else {
 			LogError(err.Error(), "")
 		}
+		return
 	}
+
+	emitProdFileEvent(fileLogEvent{Category: "silent_error", Error: err.Error()})
+}
+
+// Shutdown flushes and closes asynchronous telemetry resources.
+func Shutdown() {
+	shutdownProdSink()
 }
 
 func formatProdReqResLine(method, path string, status int) string {
@@ -356,14 +489,33 @@ func formatProdReqResLine(method, path string, status int) string {
 	if statusText == "" {
 		statusText = "Unknown"
 	}
+	statusColor := statusColor(status)
+	statusLabel := ColorStatus(status)
 	now := time.Now()
 	return fmt.Sprintf(
-		"%s %s %-6s %-80s %3d %s",
-		now.Format("15:04:05.000"),
-		now.Format("MST"),
+		"%s %s %-6s %-80s %s %s%s%s",
+		colorDim+now.Format("15:04:05.000")+colorReset,
+		colorMagenta+now.Format("MST")+colorReset,
 		strings.ToUpper(method),
 		path,
-		status,
+		statusLabel,
+		statusColor,
 		statusText,
+		colorReset,
 	)
+}
+
+func statusColor(status int) string {
+	switch {
+	case status >= 200 && status < 300:
+		return colorGreen
+	case status >= 300 && status < 400:
+		return colorCyan
+	case status >= 400 && status < 500:
+		return colorYellow
+	case status >= 500:
+		return colorRed
+	default:
+		return colorDim
+	}
 }
