@@ -207,7 +207,7 @@ func (c *Client) postJSON(url string, payload any, token string, out any) error 
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
-			fmt.Printf("failed to close response body: %v\n", err)
+			telemetry.SilentLogProdError(err)
 		}
 	}()
 
@@ -237,12 +237,12 @@ func buildAPIError(method, requestPath string, statusCode int, raw []byte) *tele
 		detail = strings.TrimSpace(string(raw))
 	}
 
-	userMsg, silent := mapAPIUserMessage(endpoint, payload.Code)
+	userMsg, actionHint, silent := mapAPIUserMessage(endpoint, payload.Code, statusCode, detail)
 	if userMsg == "" {
 		userMsg = detail
 	}
 
-	return telemetry.BuildAPIError(method, endpoint, statusCode, payload.Code, detail, userMsg, silent)
+	return telemetry.BuildAPIError(method, endpoint, statusCode, payload.Code, detail, userMsg, actionHint, silent)
 }
 
 func normalizeEndpoint(method, requestPath string) string {
@@ -262,42 +262,66 @@ func normalizeEndpoint(method, requestPath string) string {
 	}
 }
 
-func mapAPIUserMessage(endpoint, code string) (string, bool) {
+func mapAPIUserMessage(endpoint, code string, statusCode int, detail string) (string, string, bool) {
+	if statusCode == http.StatusUnauthorized {
+		switch code {
+		case "LOGIN_REQUIRED":
+			return "You are not logged in.", "Run: fasttunnel login", false
+		case "INVALID_AUTH_HEADER", "INVALID_TOKEN", "INVALID_REFRESH_TOKEN", "WRONG_TOKEN_TYPE", "INVALID_SESSION", "UNAUTHORIZED":
+			if isTokenExpiredDetail(detail) {
+				return "Session expired.", "Run: fasttunnel login", false
+			}
+			return "Authentication failed.", "Run: fasttunnel login", false
+		}
+
+		if isTokenExpiredDetail(detail) {
+			return "Session expired.", "Run: fasttunnel login", false
+		}
+	}
+
 	switch endpoint {
 	case "/api/v1/auth/cli/init":
 		if code == "UNSUPPORTED_CHALLENGE_METHOD" {
-			return "Error logging in, try again later", false
+			return "Error logging in, try again later", "", false
 		}
 
 	case "/api/v1/auth/cli/token":
 		switch code {
 		case "PKCE_VERIFICATION_FAILED", "REDIRECT_URI_MISMATCH":
-			return "Error logging in, verification failed", false
+			return "Error logging in, verification failed", "", false
 		}
 
 	case "/api/v1/tunnels":
 		switch code {
 		case "UNSUPPORTED_PROTOCOL":
-			return "Protocol not supported", false
+			return "Protocol not supported", "", false
 		case "SUBDOMAIN_RESERVED":
-			return "Cannot issue the requested domain, try a different domain", false
+			return "Cannot issue the requested domain, try a different domain", "", false
 		case "SUBDOMAIN_TAKEN":
-			return "Domain is already taken, try a different domain", false
+			return "Domain is already taken, try a different domain", "", false
 		}
 
 	case "/api/v1/sessions/lease":
 		switch code {
 		case "TUNNEL_OWNERSHIP_DENIED":
-			return "Nice try..", false
+			return "Nice try..", "", false
 		case "TUNNEL_DELETED":
-			return "Tunnel not found", false
+			return "Tunnel not found", "", false
 		}
 
 	case "/api/v1/tunnels/{tunnelId}":
 		if code == "TUNNEL_NOT_FOUND" {
-			return "", true
+			return "", "", true
 		}
 	}
 
-	return "", false
+	return "", "", false
+}
+
+func isTokenExpiredDetail(detail string) bool {
+	d := strings.ToLower(strings.TrimSpace(detail))
+	if d == "" {
+		return false
+	}
+	return strings.Contains(d, "token has expired") || strings.Contains(d, "session token has expired") || strings.Contains(d, "expired")
 }
