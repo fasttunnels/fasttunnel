@@ -39,7 +39,7 @@ _fasttunnel()
     local cmd="${words[1]}"
     case "${cmd}" in
         http|https)
-            COMPREPLY=( $(compgen -W "-p --port -s --subdomain" -- "${cur}") )
+        COMPREPLY=( $(compgen -W "-p --port -s --subdomain --ui --no-ui" -- "${cur}") )
             ;;
         login)
             COMPREPLY=( $(compgen -W "-c --callback-port" -- "${cur}") )
@@ -77,7 +77,9 @@ _fasttunnel() {
       _arguments \
         '1:port:' \
         '(-p --port)'{-p,--port}'[local port]:port:' \
-        '(-s --subdomain)'{-s,--subdomain}'[subdomain]:subdomain:'
+        '(-s --subdomain)'{-s,--subdomain}'[subdomain]:subdomain:' \
+        '--ui[enable interactive dashboard]' \
+        '--no-ui[disable interactive dashboard]'
       ;;
     login)
       _arguments \
@@ -108,6 +110,8 @@ complete -c fasttunnel -n "__fish_use_subcommand" -a "version" -d "Show version 
 
 complete -c fasttunnel -n "__fish_seen_subcommand_from http https" -s p -l port -d "Local port"
 complete -c fasttunnel -n "__fish_seen_subcommand_from http https" -s s -l subdomain -d "Subdomain"
+complete -c fasttunnel -n "__fish_seen_subcommand_from http https" -l ui -d "Enable interactive dashboard"
+complete -c fasttunnel -n "__fish_seen_subcommand_from http https" -l no-ui -d "Disable interactive dashboard"
 complete -c fasttunnel -n "__fish_seen_subcommand_from login" -s c -l callback-port -d "Callback port"
 
 complete -c fasttunnel -n "__fish_seen_subcommand_from completion" -a "zsh bash fish" -d "Target shell"

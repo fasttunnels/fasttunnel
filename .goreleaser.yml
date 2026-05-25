@@ -23,6 +23,7 @@ builds:
       - -X main.version={{.Version}}
       - -X main.commit={{.ShortCommit}}
       - -X main.buildDate={{.Date}}
+      - -X main.buildChannel=prod
       - -X github.com/fasttunnels/fasttunnel/internal/config.DefaultControlPlaneURL=https://api.fasttunnel.dev
       - -X github.com/fasttunnels/fasttunnel/internal/config.DefaultEdgeURL=https://edge.fasttunnel.dev
     flags:

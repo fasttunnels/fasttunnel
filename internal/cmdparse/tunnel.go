@@ -40,6 +40,8 @@ func parseTunnel(protocol string, args []string) (Tunnel, error) {
 	fs.IntVar(port, "p", 8080, "local port to forward (shorthand)")
 	subdomain := fs.String("subdomain", "", "optional vanity subdomain")
 	fs.StringVar(subdomain, "s", "", "optional vanity subdomain (shorthand)")
+	uiEnabled := fs.Bool("ui", true, "enable interactive tunnel dashboard")
+	noUI := fs.Bool("no-ui", false, "disable interactive tunnel dashboard")
 
 	if err := fs.Parse(flagArgs); err != nil {
 		return Tunnel{}, err
@@ -59,9 +61,15 @@ func parseTunnel(protocol string, args []string) (Tunnel, error) {
 		return Tunnel{}, fmt.Errorf("port %d out of range (1-65535)", resolvedPort)
 	}
 
+	resolvedUI := *uiEnabled
+	if *noUI {
+		resolvedUI = false
+	}
+
 	return Tunnel{
 		Protocol:  strings.ToLower(protocol),
 		Port:      resolvedPort,
 		Subdomain: *subdomain,
+		UIEnabled: resolvedUI,
 	}, nil
 }

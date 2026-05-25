@@ -108,12 +108,12 @@ func extractProtocol(args []string) (value string, rest []string, found bool) {
 func Usage() string {
 	return strings.TrimSpace(`
 usage:
-  fasttunnel http  <port> [-s subdomain]
-  fasttunnel https <port> [-s subdomain]
-  fasttunnel http  -p <port> [-s <subdomain>]
-  fasttunnel https --port <port> [--subdomain <subdomain>]
-  fasttunnel --protocol http  --port <port> [--subdomain <subdomain>]
-  fasttunnel --protocol https -p <port> [-s <subdomain>]
+	fasttunnel http  <port> [-s subdomain] [--ui|--no-ui]
+	fasttunnel https <port> [-s subdomain] [--ui|--no-ui]
+	fasttunnel http  -p <port> [-s <subdomain>] [--ui|--no-ui]
+	fasttunnel https --port <port> [--subdomain <subdomain>] [--ui|--no-ui]
+	fasttunnel --protocol http  --port <port> [--subdomain <subdomain>] [--ui|--no-ui]
+	fasttunnel --protocol https -p <port> [-s <subdomain>] [--ui|--no-ui]
   fasttunnel login [-c <callback-port>]
 	fasttunnel completion <zsh|bash|fish>
   fasttunnel version

@@ -5,6 +5,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -20,22 +21,29 @@ import (
 //	-X main.version=v1.2.3
 //	-X main.commit=abc1234
 //	-X main.buildDate=2026-04-14
+//	-X main.buildChannel=prod
 //
 // A plain `go build` without ldflags leaves these as "dev".
 var (
-	version   = "dev"
-	commit    = "none"
-	buildDate = "unknown"
+	version      = "dev"
+	commit       = "none"
+	buildDate    = "unknown"
+	buildChannel = "dev"
 )
 
 func main() {
+	os.Exit(run())
+}
+
+func run() int {
 	parsed, err := cmdparse.Parse(os.Args[1:])
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		return 1
 	}
 
-	telemetry.SetMode(version)
+	telemetry.SetModeWithVersion(buildChannel, version)
+	defer telemetry.Shutdown()
 
 	client := agent.NewClient(version)
 	svc := tunnel.New(client)
@@ -46,30 +54,36 @@ func main() {
 	case cmdparse.CmdCompletion:
 		if err := commands.RunCompletion(parsed.Completion.Shell); err != nil {
 			telemetry.LogError(err.Error(), "")
-			os.Exit(1)
+			return 1
 		}
 	case cmdparse.CmdLogin:
 		if err := commands.RunLogin(client, parsed.Login); err != nil {
-			apiErr, ok := err.(*telemetry.APIError)
-			if ok {
-				telemetry.LogError(apiErr.UserMsg, apiErr.Error())
-			} else {
-				telemetry.LogError(err.Error(), "")
-			}
-			os.Exit(1)
+			logCommandError(err)
+			return 1
 		}
 	case cmdparse.CmdHTTP, cmdparse.CmdHTTPS:
 		if err := commands.RunHTTP(svc, parsed.Tunnel); err != nil {
-			apiErr, ok := err.(*telemetry.APIError)
-			if ok {
-				telemetry.LogError(apiErr.UserMsg, apiErr.Error())
-			} else {
-				telemetry.LogError(err.Error(), "")
-			}
-			os.Exit(1)
+			logCommandError(err)
+			return 1
 		}
 	default:
 		fmt.Fprintf(os.Stderr, "unhandled command %q\n", parsed.Name)
-		os.Exit(1)
+		return 1
 	}
+
+	return 0
+}
+
+func logCommandError(err error) {
+	if err == nil {
+		return
+	}
+
+	var apiErr *telemetry.APIError
+	if errors.As(err, &apiErr) {
+		telemetry.LogAPIError(apiErr)
+		return
+	}
+
+	telemetry.LogError(err.Error(), "")
 }
