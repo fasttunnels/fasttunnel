@@ -133,6 +133,16 @@ func (r *wsStreamRegistry) closeAll() {
 	}
 }
 
+func requestEventID(req frame) string {
+	if req.RequestID != "" {
+		return req.RequestID
+	}
+	if req.StreamID != "" {
+		return req.StreamID
+	}
+	return fmt.Sprintf("%s-%d", strings.ToUpper(req.Method), time.Now().UnixNano())
+}
+
 // ── Agent loop ────────────────────────────────────────────────────────────────
 
 // RunAgentLoop connects to the edge WebSocket at wsURL, authenticates with
@@ -140,27 +150,54 @@ func (r *wsStreamRegistry) closeAll() {
 //
 // It never returns unless ctx is cancelled or an unrecoverable error occurs.
 // Transient connection errors trigger an exponential-backoff reconnect.
-func RunAgentLoop(ctx context.Context, edgeHTTPURL, sessionToken string, localPort int) error {
+func RunAgentLoop(ctx context.Context, edgeHTTPURL, sessionToken string, localPort int, opts RunOptions) error {
 	wsURL := httpToWS(edgeHTTPURL) + "/connect"
 	backoff := 1 * time.Second
 
 	for {
 		select {
 		case <-ctx.Done():
+			opts.emit(RuntimeEvent{
+				Type:  RuntimeEventConnectionState,
+				Time:  time.Now(),
+				State: ConnectionStateStopping,
+			})
 			return ctx.Err()
 		default:
 		}
 
-		err := runOnce(ctx, wsURL, sessionToken, localPort)
+		opts.emit(RuntimeEvent{
+			Type:  RuntimeEventConnectionState,
+			Time:  time.Now(),
+			State: ConnectionStateConnecting,
+		})
+
+		err := runOnce(ctx, wsURL, sessionToken, localPort, opts)
 		if err != nil {
 			if ctx.Err() != nil {
+				opts.emit(RuntimeEvent{
+					Type:  RuntimeEventConnectionState,
+					Time:  time.Now(),
+					State: ConnectionStateStopping,
+				})
 				return ctx.Err()
 			}
-			// Silently retry with backoff
+			opts.emit(RuntimeEvent{
+				Type:    RuntimeEventConnectionState,
+				Time:    time.Now(),
+				State:   ConnectionStateReconnecting,
+				Reason:  err.Error(),
+				Backoff: backoff,
+			})
 		}
 
 		select {
 		case <-ctx.Done():
+			opts.emit(RuntimeEvent{
+				Type:  RuntimeEventConnectionState,
+				Time:  time.Now(),
+				State: ConnectionStateStopping,
+			})
 			return ctx.Err()
 		case <-time.After(backoff):
 		}
@@ -173,7 +210,7 @@ func RunAgentLoop(ctx context.Context, edgeHTTPURL, sessionToken string, localPo
 }
 
 // runOnce establishes one WebSocket connection and services it until it closes.
-func runOnce(ctx context.Context, wsURL, sessionToken string, localPort int) error {
+func runOnce(ctx context.Context, wsURL, sessionToken string, localPort int, opts RunOptions) error {
 	header := http.Header{"Authorization": {"Bearer " + sessionToken}}
 
 	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, header)
@@ -192,6 +229,11 @@ func runOnce(ctx context.Context, wsURL, sessionToken string, localPort int) err
 	defer streams.closeAll()
 
 	telemetry.LogInfo(fmt.Sprintf("connected to %s", wsURL))
+	opts.emit(RuntimeEvent{
+		Type:  RuntimeEventConnectionState,
+		Time:  time.Now(),
+		State: ConnectionStateOnline,
+	})
 
 	var writeMu sync.Mutex
 
@@ -231,9 +273,9 @@ func runOnce(ctx context.Context, wsURL, sessionToken string, localPort int) err
 			pongMsg, _ := json.Marshal(frame{Type: framePong})
 			_ = writeJSON(conn, &writeMu, websocket.TextMessage, pongMsg)
 		case frameHTTPRequest:
-			go handleHTTPRequest(ctx, conn, &writeMu, f, localPort)
+			go handleHTTPRequest(ctx, conn, &writeMu, f, localPort, opts)
 		case frameWSOpen:
-			go handleWebSocketOpen(ctx, conn, &writeMu, f, localPort, streams)
+			go handleWebSocketOpen(ctx, conn, &writeMu, f, localPort, streams, opts)
 		case frameWSData:
 			handleWebSocketData(conn, &writeMu, f, streams)
 		case frameWSClose, frameWSError:
@@ -244,8 +286,24 @@ func runOnce(ctx context.Context, wsURL, sessionToken string, localPort int) err
 
 // handleHTTPRequest proxies a single tunnel HTTP request to the local app and
 // sends the response frame back over the WebSocket connection.
-func handleHTTPRequest(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, req frame, localPort int) {
+func handleHTTPRequest(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, req frame, localPort int, opts RunOptions) {
 	start := time.Now()
+	requestID := requestEventID(req)
+	path := req.Path
+	if path == "" {
+		path = "/"
+	}
+	if req.Query != "" {
+		path += "?" + req.Query
+	}
+
+	opts.emit(RuntimeEvent{
+		Type:      RuntimeEventRequestStart,
+		Time:      start,
+		RequestID: requestID,
+		Method:    strings.ToUpper(req.Method),
+		Path:      path,
+	})
 
 	// Log incoming request
 	telemetry.LogForwardStart(
@@ -268,6 +326,21 @@ func handleHTTPRequest(ctx context.Context, conn *websocket.Conn, writeMu *sync.
 		resp.Status,
 		duration,
 	)
+
+	responseEventType := RuntimeEventRequestComplete
+	if resp.Status >= http.StatusBadGateway {
+		responseEventType = RuntimeEventRequestError
+	}
+	opts.emit(RuntimeEvent{
+		Type:      responseEventType,
+		Time:      time.Now(),
+		RequestID: requestID,
+		Method:    strings.ToUpper(req.Method),
+		Path:      path,
+		Status:    resp.Status,
+		Duration:  duration,
+		Error:     resp.Error,
+	})
 
 	data, err := json.Marshal(resp)
 	if err != nil {
@@ -294,19 +367,30 @@ func writeFrame(conn *websocket.Conn, writeMu *sync.Mutex, f frame) error {
 	return writeJSON(conn, writeMu, websocket.TextMessage, data)
 }
 
-func handleWebSocketOpen(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, req frame, localPort int, streams *wsStreamRegistry) {
+func handleWebSocketOpen(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, req frame, localPort int, streams *wsStreamRegistry, opts RunOptions) {
 	if req.StreamID == "" {
 		return
 	}
 
 	start := time.Now()
-	localTarget := fmt.Sprintf("localhost:%d", localPort)
-	telemetry.LogForwardStart("tunnel", req.Method, req.Path, req.Query, localTarget)
-
+	requestID := requestEventID(req)
 	path := req.Path
 	if path == "" {
 		path = "/"
 	}
+	if req.Query != "" {
+		path += "?" + req.Query
+	}
+	opts.emit(RuntimeEvent{
+		Type:      RuntimeEventRequestStart,
+		Time:      start,
+		RequestID: requestID,
+		Method:    strings.ToUpper(req.Method),
+		Path:      path,
+	})
+
+	localTarget := fmt.Sprintf("localhost:%d", localPort)
+	telemetry.LogForwardStart("tunnel", req.Method, req.Path, req.Query, localTarget)
 
 	targetURL := fmt.Sprintf("ws://localhost:%d%s", localPort, path)
 	if req.Query != "" {
@@ -328,6 +412,16 @@ func handleWebSocketOpen(ctx context.Context, conn *websocket.Conn, writeMu *syn
 	if err != nil {
 		reason := formatLocalWSError(err, resp)
 		telemetry.LogForwardError("tunnel", req.Method, req.Path, req.Query, localTarget, reason)
+		opts.emit(RuntimeEvent{
+			Type:      RuntimeEventRequestError,
+			Time:      time.Now(),
+			RequestID: requestID,
+			Method:    strings.ToUpper(req.Method),
+			Path:      path,
+			Status:    http.StatusBadGateway,
+			Duration:  time.Since(start),
+			Error:     reason,
+		})
 		_ = writeFrame(conn, writeMu, frame{
 			Type:     frameWSOpenAck,
 			StreamID: req.StreamID,
@@ -338,7 +432,17 @@ func handleWebSocketOpen(ctx context.Context, conn *websocket.Conn, writeMu *syn
 	}
 
 	streams.set(req.StreamID, &localWSStream{conn: localConn})
-	telemetry.LogResponse("tunnel", req.Method, req.Path, req.Query, http.StatusSwitchingProtocols, time.Since(start))
+	duration := time.Since(start)
+	telemetry.LogResponse("tunnel", req.Method, req.Path, req.Query, http.StatusSwitchingProtocols, duration)
+	opts.emit(RuntimeEvent{
+		Type:      RuntimeEventRequestComplete,
+		Time:      time.Now(),
+		RequestID: requestID,
+		Method:    strings.ToUpper(req.Method),
+		Path:      path,
+		Status:    http.StatusSwitchingProtocols,
+		Duration:  duration,
+	})
 
 	if err := writeFrame(conn, writeMu, frame{
 		Type:        frameWSOpenAck,
@@ -667,6 +771,7 @@ func errorFrame(requestID string, status int, msg string) frame {
 		Status:    status,
 		Headers:   map[string][]string{"Content-Type": {"application/json"}},
 		Body:      base64.StdEncoding.EncodeToString([]byte(respBody)),
+		Error:     msg,
 	}
 }
 

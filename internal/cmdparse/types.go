@@ -57,6 +57,9 @@ type Tunnel struct {
 	// Subdomain is an optional vanity subdomain.
 	// Empty string means the control plane assigns one randomly.
 	Subdomain string
+
+	// UIEnabled controls whether the interactive tunnel dashboard is enabled.
+	UIEnabled bool
 }
 
 // Login holds the normalised arguments for the login command.

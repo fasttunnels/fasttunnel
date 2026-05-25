@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -37,9 +38,19 @@ type APIError struct {
 
 // mode controls whether to log full context (dev) or only user messages (prod).
 var (
-	mode   = "dev"
-	modeMu sync.RWMutex
+	mode         = "dev"
+	modeMu       sync.RWMutex
+	terminalMute atomic.Bool
 )
+
+func shouldRenderTerminalOutput() bool {
+	return !terminalMute.Load()
+}
+
+// SetTerminalOutputMuted toggles terminal printing while keeping telemetry sinks active.
+func SetTerminalOutputMuted(muted bool) {
+	terminalMute.Store(muted)
+}
 
 // SetMode resolves logging mode from runtime overrides and build channel.
 // Precedence: FASTTUNNEL_LOG_MODE -> FASTTUNNEL_MODE -> build channel.
@@ -210,6 +221,9 @@ func LogRequest(domain, method, path, query string) {
 		})
 		return
 	}
+	if !shouldRenderTerminalOutput() {
+		return
+	}
 	path = TruncatePath(path, 60)
 
 	fmt.Printf(
@@ -237,7 +251,12 @@ func LogResponse(domain, method, path, query string, status int, duration time.D
 			Status:     status,
 			DurationMS: duration.Milliseconds(),
 		})
-		fmt.Println(formatProdReqResLine(method, path, status))
+		if shouldRenderTerminalOutput() {
+			fmt.Println(formatProdReqResLine(method, path, status))
+		}
+		return
+	}
+	if !shouldRenderTerminalOutput() {
 		return
 	}
 
@@ -269,6 +288,9 @@ func LogForwardStart(domain, method, path, query, localTarget string) {
 		})
 		return
 	}
+	if !shouldRenderTerminalOutput() {
+		return
+	}
 	path = TruncatePath(path, 50)
 	fmt.Printf(
 		"%s %s %s → %s%s %s\n",
@@ -297,6 +319,9 @@ func LogForwardError(domain, method, path, query, localTarget, errMsg string) {
 		})
 		return
 	}
+	if !shouldRenderTerminalOutput() {
+		return
+	}
 	path = TruncatePath(path, 50)
 	fmt.Printf(
 		"%s %s %s → %s%s %s\n",
@@ -321,6 +346,9 @@ func LogEdgeForward(domain, method, path, query string) {
 			Method:   strings.ToUpper(method),
 			Path:     path,
 		})
+		return
+	}
+	if !shouldRenderTerminalOutput() {
 		return
 	}
 	path = TruncatePath(path, 60)
@@ -350,6 +378,9 @@ func LogEdgeResponse(domain, method, path, query string, status int, duration ti
 		})
 		return
 	}
+	if !shouldRenderTerminalOutput() {
+		return
+	}
 	path = TruncatePath(path, 60)
 	fmt.Printf(
 		"%s %s %s %s %s %s\n",
@@ -372,6 +403,9 @@ func LogAgentDisconnect(domain, reason string) {
 		})
 		return
 	}
+	if !shouldRenderTerminalOutput() {
+		return
+	}
 	fmt.Printf(
 		"%s %s %s\n",
 		colorYellow+"[DISCO]"+colorReset,
@@ -389,6 +423,9 @@ func LogAgentConnect(domain string) {
 		})
 		return
 	}
+	if !shouldRenderTerminalOutput() {
+		return
+	}
 	fmt.Printf(
 		"%s %s %s\n",
 		colorGreen+"[CONN]"+colorReset,
@@ -400,10 +437,15 @@ func LogAgentConnect(domain string) {
 // LogInfo logs an informational message (always timestamped in dev mode).
 func LogInfo(msg string) {
 	if isDev() {
+		if !shouldRenderTerminalOutput() {
+			return
+		}
 		fmt.Printf("[INFO] %s\n", msg)
 	} else {
 		emitProdFileEvent(fileLogEvent{Category: "info", Message: msg})
-		fmt.Printf("%s\n", msg)
+		if shouldRenderTerminalOutput() {
+			fmt.Printf("%s\n", msg)
+		}
 	}
 }
 
@@ -411,6 +453,9 @@ func LogInfo(msg string) {
 // context is ignored in production mode.
 func LogError(userMsg, context string) {
 	if isDev() {
+		if !shouldRenderTerminalOutput() {
+			return
+		}
 		if context != "" {
 			fmt.Printf("[ERROR] %s (%s)\n", userMsg, context)
 		} else {
@@ -418,7 +463,9 @@ func LogError(userMsg, context string) {
 		}
 	} else {
 		emitProdFileEvent(fileLogEvent{Category: "user_error", Message: userMsg, Error: context})
-		fmt.Printf("%s\n", ColorError(userMsg))
+		if shouldRenderTerminalOutput() {
+			fmt.Printf("%s\n", ColorError(userMsg))
+		}
 	}
 }
 
@@ -430,6 +477,9 @@ func LogAPIError(apiErr *APIError) {
 
 	if isDev() {
 		LogError(apiErr.UserMsg, apiErr.Error())
+		if !shouldRenderTerminalOutput() {
+			return
+		}
 		if apiErr.ActionHint != "" {
 			fmt.Printf("[HINT] %s\n", apiErr.ActionHint)
 		}
@@ -445,8 +495,10 @@ func LogAPIError(apiErr *APIError) {
 		Action:   apiErr.ActionHint,
 	})
 
-	fmt.Printf("%s\n", ColorError(apiErr.UserMsg))
-	if apiErr.ActionHint != "" {
+	if shouldRenderTerminalOutput() {
+		fmt.Printf("%s\n", ColorError(apiErr.UserMsg))
+	}
+	if apiErr.ActionHint != "" && shouldRenderTerminalOutput() {
 		fmt.Printf("%s %s\n", colorCyan+"→"+colorReset, colorYellow+apiErr.ActionHint+colorReset)
 	}
 }
