@@ -33,6 +33,17 @@ jobs:
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
 
+      - name: Validate tap/bucket tokens
+        run: |
+          set -euo pipefail
+          curl -fsS -H "Authorization: Bearer $HOMEBREW_TAP_TOKEN" \
+            https://api.github.com/repos/fasttunnels/homebrew-fasttunnel >/dev/null
+          curl -fsS -H "Authorization: Bearer $SCOOP_BUCKET_TOKEN" \
+            https://api.github.com/repos/fasttunnels/scoop-fasttunnel >/dev/null
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          SCOOP_BUCKET_TOKEN: ${{ secrets.SCOOP_BUCKET_TOKEN }}
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
