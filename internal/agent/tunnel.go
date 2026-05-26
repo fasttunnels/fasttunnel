@@ -31,6 +31,12 @@ const (
 	// frameHTTPResponse is sent by the CLI agent back to the edge after it has
 	// proxied the request to the local application.
 	frameHTTPResponse = "http_response"
+	// frameHTTPResponseStart begins a streamed HTTP response.
+	frameHTTPResponseStart = "http_response_start"
+	// frameHTTPResponseChunk carries a chunk of a streamed HTTP response body.
+	frameHTTPResponseChunk = "http_response_chunk"
+	// frameHTTPResponseEnd ends a streamed HTTP response.
+	frameHTTPResponseEnd = "http_response_end"
 	// frameWSOpen asks the agent to open a websocket stream to the local app.
 	frameWSOpen = "ws_open"
 	// frameWSOpenAck confirms whether opening a websocket stream succeeded.
@@ -289,6 +295,9 @@ func runOnce(ctx context.Context, wsURL, sessionToken string, localPort int, opt
 func handleHTTPRequest(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, req frame, localPort int, opts RunOptions) {
 	start := time.Now()
 	requestID := requestEventID(req)
+	if req.RequestID == "" {
+		req.RequestID = requestID
+	}
 	path := req.Path
 	if path == "" {
 		path = "/"
@@ -314,7 +323,9 @@ func handleHTTPRequest(ctx context.Context, conn *websocket.Conn, writeMu *sync.
 		fmt.Sprintf("localhost:%d", localPort),
 	)
 
-	resp := forwardToLocal(ctx, req, localPort)
+	respStatus, _, respErr := forwardToLocalStream(ctx, req, localPort, func(f frame) error {
+		return writeFrame(conn, writeMu, f)
+	})
 	duration := time.Since(start)
 
 	// Always emit a response log line; status formatting is handled by telemetry.
@@ -323,12 +334,12 @@ func handleHTTPRequest(ctx context.Context, conn *websocket.Conn, writeMu *sync.
 		req.Method,
 		req.Path,
 		req.Query,
-		resp.Status,
+		respStatus,
 		duration,
 	)
 
 	responseEventType := RuntimeEventRequestComplete
-	if resp.Status >= http.StatusBadGateway {
+	if respStatus >= http.StatusBadGateway || respErr != "" {
 		responseEventType = RuntimeEventRequestError
 	}
 	opts.emit(RuntimeEvent{
@@ -337,20 +348,10 @@ func handleHTTPRequest(ctx context.Context, conn *websocket.Conn, writeMu *sync.
 		RequestID: requestID,
 		Method:    strings.ToUpper(req.Method),
 		Path:      path,
-		Status:    resp.Status,
+		Status:    respStatus,
 		Duration:  duration,
-		Error:     resp.Error,
+		Error:     respErr,
 	})
-
-	data, err := json.Marshal(resp)
-	if err != nil {
-		// Silently skip if we can't marshal the response
-		return
-	}
-	if err := writeJSON(conn, writeMu, websocket.TextMessage, data); err != nil {
-		// Silently skip if we can't write the response
-		telemetry.SilentLogProdError(err)
-	}
 }
 
 func writeJSON(conn *websocket.Conn, writeMu *sync.Mutex, messageType int, data []byte) error {
@@ -629,8 +630,10 @@ func requestedWebSocketSubprotocols(headers map[string][]string) []string {
 	return protocols
 }
 
-// forwardToLocal sends the tunnel request to localhost:localPort and returns the response frame.
-func forwardToLocal(ctx context.Context, req frame, localPort int) frame {
+const maxResponseChunkBytes = 512 * 1024
+
+// forwardToLocalStream sends the tunnel request to localhost:localPort and streams the response.
+func forwardToLocalStream(ctx context.Context, req frame, localPort int, send func(frame) error) (int, int, string) {
 	// Build the target URL.
 	path := req.Path
 	if path == "" {
@@ -652,7 +655,7 @@ func forwardToLocal(ctx context.Context, req frame, localPort int) frame {
 
 	httpReq, err := http.NewRequestWithContext(ctx, req.Method, targetURL, bodyReader)
 	if err != nil {
-		return errorFrame(req.RequestID, http.StatusBadGateway, "failed to build request")
+		return sendErrorResponse(req.RequestID, http.StatusBadGateway, "failed to build request", send)
 	}
 	httpReq.Host = fmt.Sprintf("localhost:%d", localPort)
 
@@ -683,7 +686,7 @@ func forwardToLocal(ctx context.Context, req frame, localPort int) frame {
 	client := &http.Client{Timeout: 25 * time.Second}
 	httpResp, err := client.Do(httpReq)
 	if err != nil {
-		return errorFrame(req.RequestID, http.StatusBadGateway, "local app unreachable")
+		return sendErrorResponse(req.RequestID, http.StatusBadGateway, "local app unreachable", send)
 	}
 
 	defer func() {
@@ -693,27 +696,66 @@ func forwardToLocal(ctx context.Context, req frame, localPort int) frame {
 		}
 	}()
 
-	// Read response body; cap at 16 MiB.
-	respBody, err := io.ReadAll(io.LimitReader(httpResp.Body, 16*1024*1024))
-	if err != nil {
-		return errorFrame(req.RequestID, http.StatusInternalServerError, "failed to read response")
-	}
-
 	respHeaders := make(map[string][]string)
 	for k, vals := range httpResp.Header {
 		if isHopByHopHeader(k) {
 			continue
 		}
+		if strings.EqualFold(k, "content-length") {
+			continue
+		}
 		respHeaders[k] = vals
 	}
 
-	return frame{
-		Type:      frameHTTPResponse,
+	startFrame := frame{
+		Type:      frameHTTPResponseStart,
 		RequestID: req.RequestID,
 		Status:    httpResp.StatusCode,
 		Headers:   respHeaders,
-		Body:      base64.StdEncoding.EncodeToString(respBody),
 	}
+	if err := send(startFrame); err != nil {
+		telemetry.SilentLogProdError(err)
+		return http.StatusBadGateway, 0, "failed to send response"
+	}
+
+	bytesSent := 0
+	buf := make([]byte, maxResponseChunkBytes)
+	for {
+		readBytes, readErr := httpResp.Body.Read(buf)
+		if readBytes > 0 {
+			chunk := frame{
+				Type:      frameHTTPResponseChunk,
+				RequestID: req.RequestID,
+				Body:      base64.StdEncoding.EncodeToString(buf[:readBytes]),
+			}
+			if err := send(chunk); err != nil {
+				telemetry.SilentLogProdError(err)
+				return http.StatusBadGateway, bytesSent, "failed to send response"
+			}
+			bytesSent += readBytes
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			endErr := send(frame{
+				Type:      frameHTTPResponseEnd,
+				RequestID: req.RequestID,
+				Error:     "failed to read response",
+			})
+			if endErr != nil {
+				telemetry.SilentLogProdError(endErr)
+			}
+			return httpResp.StatusCode, bytesSent, "failed to read response"
+		}
+	}
+
+	if err := send(frame{Type: frameHTTPResponseEnd, RequestID: req.RequestID}); err != nil {
+		telemetry.SilentLogProdError(err)
+		return http.StatusBadGateway, bytesSent, "failed to send response"
+	}
+
+	return httpResp.StatusCode, bytesSent, ""
 }
 
 func isHopByHopHeader(header string) bool {
@@ -763,16 +805,33 @@ func rewriteOriginForLocal(origin, originalHost string, localPort int) (string, 
 	return originURL.String(), true
 }
 
-func errorFrame(requestID string, status int, msg string) frame {
+func sendErrorResponse(requestID string, status int, msg string, send func(frame) error) (int, int, string) {
 	respBody := fmt.Sprintf(`{"error":%q}`, msg)
-	return frame{
-		Type:      frameHTTPResponse,
+	if err := send(frame{
+		Type:      frameHTTPResponseStart,
 		RequestID: requestID,
 		Status:    status,
 		Headers:   map[string][]string{"Content-Type": {"application/json"}},
-		Body:      base64.StdEncoding.EncodeToString([]byte(respBody)),
-		Error:     msg,
+	}); err != nil {
+		telemetry.SilentLogProdError(err)
+		return status, 0, msg
 	}
+
+	if err := send(frame{
+		Type:      frameHTTPResponseChunk,
+		RequestID: requestID,
+		Body:      base64.StdEncoding.EncodeToString([]byte(respBody)),
+	}); err != nil {
+		telemetry.SilentLogProdError(err)
+		return status, 0, msg
+	}
+
+	if err := send(frame{Type: frameHTTPResponseEnd, RequestID: requestID, Error: msg}); err != nil {
+		telemetry.SilentLogProdError(err)
+		return status, len(respBody), msg
+	}
+
+	return status, len(respBody), msg
 }
 
 // httpToWS converts an http(s):// URL to a ws(s):// URL.
