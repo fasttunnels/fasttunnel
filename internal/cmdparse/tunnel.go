@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // parseTunnel resolves all supported flag / positional forms for the http and
@@ -42,6 +43,11 @@ func parseTunnel(protocol string, args []string) (Tunnel, error) {
 	fs.StringVar(subdomain, "s", "", "optional vanity subdomain (shorthand)")
 	uiEnabled := fs.Bool("ui", true, "enable interactive tunnel dashboard")
 	noUI := fs.Bool("no-ui", false, "disable interactive tunnel dashboard")
+	memstats := fs.Bool("memstats", false, "emit periodic runtime memory snapshots")
+	memstatsInterval := fs.Duration("memstats-interval", 15*time.Second, "interval for memory snapshots")
+	pprofAddr := fs.String("pprof-addr", "", "serve Go pprof endpoints on a local address")
+	cpuProfile := fs.String("cpu-profile", "", "write a CPU profile to the given file")
+	heapProfile := fs.String("heap-profile", "", "write a heap profile to the given file on exit")
 
 	if err := fs.Parse(flagArgs); err != nil {
 		return Tunnel{}, err
@@ -67,9 +73,14 @@ func parseTunnel(protocol string, args []string) (Tunnel, error) {
 	}
 
 	return Tunnel{
-		Protocol:  strings.ToLower(protocol),
-		Port:      resolvedPort,
-		Subdomain: *subdomain,
-		UIEnabled: resolvedUI,
+		Protocol:            strings.ToLower(protocol),
+		Port:                resolvedPort,
+		Subdomain:           *subdomain,
+		UIEnabled:           resolvedUI,
+		MemoryStatsEnabled:  *memstats,
+		MemoryStatsInterval: *memstatsInterval,
+		PprofAddr:           strings.TrimSpace(*pprofAddr),
+		CPUProfilePath:      strings.TrimSpace(*cpuProfile),
+		HeapProfilePath:     strings.TrimSpace(*heapProfile),
 	}, nil
 }

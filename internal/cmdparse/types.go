@@ -20,6 +20,8 @@
 //	  fasttunnel login -c 43001
 package cmdparse
 
+import "time"
+
 // CommandName identifies which top-level command was parsed.
 type CommandName string
 
@@ -60,6 +62,21 @@ type Tunnel struct {
 
 	// UIEnabled controls whether the interactive tunnel dashboard is enabled.
 	UIEnabled bool
+
+	// MemoryStatsEnabled toggles periodic runtime memory snapshots.
+	MemoryStatsEnabled bool
+
+	// MemoryStatsInterval controls how often memory snapshots are sampled.
+	MemoryStatsInterval time.Duration
+
+	// PprofAddr exposes a local Go pprof server when set.
+	PprofAddr string
+
+	// CPUProfilePath writes a CPU profile to disk while the tunnel is active.
+	CPUProfilePath string
+
+	// HeapProfilePath writes a heap profile to disk when the tunnel exits.
+	HeapProfilePath string
 }
 
 // Login holds the normalised arguments for the login command.
