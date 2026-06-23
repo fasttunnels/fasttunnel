@@ -108,15 +108,21 @@ func extractProtocol(args []string) (value string, rest []string, found bool) {
 func Usage() string {
 	return strings.TrimSpace(`
 usage:
-	fasttunnel http  <port> [-s subdomain] [--ui|--no-ui]
-	fasttunnel https <port> [-s subdomain] [--ui|--no-ui]
-	fasttunnel http  -p <port> [-s <subdomain>] [--ui|--no-ui]
-	fasttunnel https --port <port> [--subdomain <subdomain>] [--ui|--no-ui]
-	fasttunnel --protocol http  --port <port> [--subdomain <subdomain>] [--ui|--no-ui]
-	fasttunnel --protocol https -p <port> [-s <subdomain>] [--ui|--no-ui]
+	fasttunnel http  <port> [-s subdomain] [--ui|--no-ui] [diagnostics flags]
+	fasttunnel https <port> [-s subdomain] [--ui|--no-ui] [diagnostics flags]
+	fasttunnel http  -p <port> [-s <subdomain>] [--ui|--no-ui] [diagnostics flags]
+	fasttunnel https --port <port> [--subdomain <subdomain>] [--ui|--no-ui] [diagnostics flags]
+	fasttunnel --protocol http  --port <port> [--subdomain <subdomain>] [--ui|--no-ui] [diagnostics flags]
+	fasttunnel --protocol https -p <port> [-s <subdomain>] [--ui|--no-ui] [diagnostics flags]
   fasttunnel login [-c <callback-port>]
 	fasttunnel completion <zsh|bash|fish>
   fasttunnel version
+
+diagnostics flags:
+	--memstats [--memstats-interval 15s]
+	--pprof-addr 127.0.0.1:6060
+	--cpu-profile /tmp/fasttunnel.cpu.pprof
+	--heap-profile /tmp/fasttunnel.heap.pprof
 `)
 }
 
