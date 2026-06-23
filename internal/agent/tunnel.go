@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -632,6 +633,43 @@ func requestedWebSocketSubprotocols(headers map[string][]string) []string {
 
 const maxResponseChunkBytes = 512 * 1024
 
+func streamDebugEnabled() bool {
+	value := strings.ToLower(strings.TrimSpace(os.Getenv("FASTTUNNEL_DEBUG_STREAM")))
+	switch value {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func logStreamDebug(req frame, path string, status int, contentLength, contentEncoding string, bytesSent int, errMsg string) {
+	if !streamDebugEnabled() {
+		return
+	}
+	if contentLength == "" {
+		contentLength = "-"
+	}
+	if contentEncoding == "" {
+		contentEncoding = "-"
+	}
+
+	msg := fmt.Sprintf(
+		"[STREAM] %s %s status=%d len=%s enc=%s bytes=%d id=%s",
+		strings.ToUpper(req.Method),
+		path,
+		status,
+		contentLength,
+		contentEncoding,
+		bytesSent,
+		req.RequestID,
+	)
+	if errMsg != "" {
+		msg += " err=" + errMsg
+	}
+	telemetry.LogInfo(msg)
+}
+
 // forwardToLocalStream sends the tunnel request to localhost:localPort and streams the response.
 func forwardToLocalStream(ctx context.Context, req frame, localPort int, send func(frame) error) (int, int, string) {
 	// Build the target URL.
@@ -639,9 +677,11 @@ func forwardToLocalStream(ctx context.Context, req frame, localPort int, send fu
 	if path == "" {
 		path = "/"
 	}
+	logPath := path
 	targetURL := fmt.Sprintf("http://localhost:%d%s", localPort, path)
 	if req.Query != "" {
 		targetURL += "?" + req.Query
+		logPath += "?" + req.Query
 	}
 
 	// Decode base64 body.
@@ -655,7 +695,9 @@ func forwardToLocalStream(ctx context.Context, req frame, localPort int, send fu
 
 	httpReq, err := http.NewRequestWithContext(ctx, req.Method, targetURL, bodyReader)
 	if err != nil {
-		return sendErrorResponse(req.RequestID, http.StatusBadGateway, "failed to build request", send)
+		status, bytesSent, errMsg := sendErrorResponse(req.RequestID, http.StatusBadGateway, "failed to build request", send)
+		logStreamDebug(req, logPath, status, "", "", bytesSent, errMsg)
+		return status, bytesSent, errMsg
 	}
 	httpReq.Host = fmt.Sprintf("localhost:%d", localPort)
 
@@ -686,7 +728,9 @@ func forwardToLocalStream(ctx context.Context, req frame, localPort int, send fu
 	client := &http.Client{Timeout: 25 * time.Second}
 	httpResp, err := client.Do(httpReq)
 	if err != nil {
-		return sendErrorResponse(req.RequestID, http.StatusBadGateway, "local app unreachable", send)
+		status, bytesSent, errMsg := sendErrorResponse(req.RequestID, http.StatusBadGateway, "local app unreachable", send)
+		logStreamDebug(req, logPath, status, "", "", bytesSent, errMsg)
+		return status, bytesSent, errMsg
 	}
 
 	defer func() {
@@ -697,6 +741,8 @@ func forwardToLocalStream(ctx context.Context, req frame, localPort int, send fu
 	}()
 
 	respHeaders := make(map[string][]string)
+	contentLength := httpResp.Header.Get("Content-Length")
+	contentEncoding := httpResp.Header.Get("Content-Encoding")
 	for k, vals := range httpResp.Header {
 		if isHopByHopHeader(k) {
 			continue
@@ -715,7 +761,9 @@ func forwardToLocalStream(ctx context.Context, req frame, localPort int, send fu
 	}
 	if err := send(startFrame); err != nil {
 		telemetry.SilentLogProdError(err)
-		return http.StatusBadGateway, 0, "failed to send response"
+		status := http.StatusBadGateway
+		logStreamDebug(req, logPath, status, contentLength, contentEncoding, 0, "failed to send response")
+		return status, 0, "failed to send response"
 	}
 
 	bytesSent := 0
@@ -730,7 +778,9 @@ func forwardToLocalStream(ctx context.Context, req frame, localPort int, send fu
 			}
 			if err := send(chunk); err != nil {
 				telemetry.SilentLogProdError(err)
-				return http.StatusBadGateway, bytesSent, "failed to send response"
+				status := http.StatusBadGateway
+				logStreamDebug(req, logPath, status, contentLength, contentEncoding, bytesSent, "failed to send response")
+				return status, bytesSent, "failed to send response"
 			}
 			bytesSent += readBytes
 		}
@@ -746,15 +796,19 @@ func forwardToLocalStream(ctx context.Context, req frame, localPort int, send fu
 			if endErr != nil {
 				telemetry.SilentLogProdError(endErr)
 			}
+			logStreamDebug(req, logPath, httpResp.StatusCode, contentLength, contentEncoding, bytesSent, "failed to read response")
 			return httpResp.StatusCode, bytesSent, "failed to read response"
 		}
 	}
 
 	if err := send(frame{Type: frameHTTPResponseEnd, RequestID: req.RequestID}); err != nil {
 		telemetry.SilentLogProdError(err)
-		return http.StatusBadGateway, bytesSent, "failed to send response"
+		status := http.StatusBadGateway
+		logStreamDebug(req, logPath, status, contentLength, contentEncoding, bytesSent, "failed to send response")
+		return status, bytesSent, "failed to send response"
 	}
 
+	logStreamDebug(req, logPath, httpResp.StatusCode, contentLength, contentEncoding, bytesSent, "")
 	return httpResp.StatusCode, bytesSent, ""
 }
 

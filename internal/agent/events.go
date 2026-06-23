@@ -20,6 +20,7 @@ const (
 	RuntimeEventRequestStart    RuntimeEventType = "request_start"
 	RuntimeEventRequestComplete RuntimeEventType = "request_complete"
 	RuntimeEventRequestError    RuntimeEventType = "request_error"
+	RuntimeEventMemorySnapshot  RuntimeEventType = "memory_snapshot"
 )
 
 // RuntimeEvent carries connection and request lifecycle updates for terminal UX.
@@ -37,6 +38,12 @@ type RuntimeEvent struct {
 	Status    int
 	Duration  time.Duration
 	Error     string
+
+	AllocBytes uint64
+	HeapBytes  uint64
+	SysBytes   uint64
+	NumGC      uint32
+	Goroutines int
 }
 
 // EventObserver receives runtime events from the agent loop.
