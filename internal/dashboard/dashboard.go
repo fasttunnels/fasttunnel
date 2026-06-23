@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/fasttunnels/fasttunnel/internal/agent"
+	"github.com/fasttunnels/fasttunnel/internal/diagnostics"
 )
 
 const defaultMaxRows = 15
@@ -19,6 +20,7 @@ type SessionInfo struct {
 	LocalTarget string
 	Subdomain   string
 	MaxRows     int
+	Diagnostics []string
 }
 
 type Controller struct {
@@ -87,6 +89,7 @@ type model struct {
 	stateReason string
 	stateAt     time.Time
 	backoff     time.Duration
+	lastMemory  *agent.RuntimeEvent
 
 	paused      bool
 	showHelp    bool
@@ -154,6 +157,10 @@ func (m *model) applyEvent(ev agent.RuntimeEvent) {
 		m.stateReason = ev.Reason
 		m.backoff = ev.Backoff
 		m.stateAt = ev.Time
+		return
+	case agent.RuntimeEventMemorySnapshot:
+		snapshot := ev
+		m.lastMemory = &snapshot
 		return
 	case agent.RuntimeEventRequestStart, agent.RuntimeEventRequestComplete, agent.RuntimeEventRequestError:
 		if m.paused {
@@ -234,6 +241,9 @@ func (m model) View() string {
 	fmt.Fprintf(&b, "  public url  : %s\n", m.info.PublicURL)
 	fmt.Fprintf(&b, "  local target: %s\n", m.info.LocalTarget)
 	fmt.Fprintf(&b, "  subdomain   : %s\n", m.info.Subdomain)
+	for _, line := range m.info.Diagnostics {
+		fmt.Fprintf(&b, "  %s\n", line)
+	}
 
 	stateDetail := ""
 	if m.stateReason != "" {
@@ -243,6 +253,20 @@ func (m model) View() string {
 		stateDetail += fmt.Sprintf(" retry in %s", m.backoff.Round(100*time.Millisecond))
 	}
 	fmt.Fprintf(&b, "\nstatus: %s%s\n", stateStyle.Render(strings.ToUpper(stateLabel)), metaStyle.Render(stateDetail))
+	if m.lastMemory != nil {
+		fmt.Fprintf(
+			&b,
+			"%s\n",
+			metaStyle.Render(fmt.Sprintf(
+				"memory: alloc %s  heap %s  sys %s  goroutines %d  gc %d",
+				diagnostics.FormatBytes(m.lastMemory.AllocBytes),
+				diagnostics.FormatBytes(m.lastMemory.HeapBytes),
+				diagnostics.FormatBytes(m.lastMemory.SysBytes),
+				m.lastMemory.Goroutines,
+				m.lastMemory.NumGC,
+			)),
+		)
+	}
 
 	fmt.Fprintf(&b, "%s\n", metaStyle.Render(fmt.Sprintf("active: %d  filter: %s   updates: %s",
 		len(m.active), filterLabel(m.filterIndex), updateLabel(m.paused))))
@@ -278,7 +302,7 @@ func trimForHeight(rows []requestRow, height int) []requestRow {
 	if height <= 0 {
 		return rows
 	}
-	maxRows := height - 11
+	maxRows := height - 12
 	if maxRows < 5 {
 		maxRows = 5
 	}
