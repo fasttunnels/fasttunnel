@@ -11,7 +11,7 @@ import (
 //
 // Usage:
 //
-//	fasttunnel configure ft_sk_4GpDKx9qNzJsMhL8vWrXaTbcFeY2n0OiPuQlj3RdCk7tUwAoHsVyEm1
+//	fasttunnel configure ft_sk_
 func ParseConfigure(args []string) (Configure, error) {
 	if len(args) == 0 {
 		return Configure{}, fmt.Errorf("missing auth token\n\nUsage: fasttunnel configure <auth_token>\n\nObtain a token from: https://app.fasttunnel.dev/cli-access")
