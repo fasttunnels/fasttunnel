@@ -130,42 +130,42 @@ fasttunnel http 3000 --no-ui
 
 ### Commands
 
-| Command | Description |
-| :--- | :--- |
-| `fasttunnel http <port>` | Expose local HTTP server |
-| `fasttunnel https <port>` | Expose local HTTPS server |
-| `fasttunnel login` | Authenticate CLI via browser or headless device flow |
-| `fasttunnel configure <token>` | Save personal access token (`ft_sk_...`) |
+| Command                         | Description                                              |
+| :------------------------------ | :------------------------------------------------------- |
+| `fasttunnel http <port>`        | Expose local HTTP server                                 |
+| `fasttunnel https <port>`       | Expose local HTTPS server                                |
+| `fasttunnel login`              | Authenticate CLI via browser or headless device flow     |
+| `fasttunnel configure <token>`  | Save personal access token (`ft_sk_...`)                 |
 | `fasttunnel completion <shell>` | Generate shell completion script (`zsh`, `bash`, `fish`) |
-| `fasttunnel version` | Show CLI version, commit hash, and build info |
+| `fasttunnel version`            | Show CLI version, commit hash, and build info            |
 
 ### Tunnel Options
 
-| Flag | Short | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `--port` | `-p` | `8080` | Local port to forward traffic to |
-| `--subdomain` | `-s` | random | Vanity subdomain (e.g. `my-app` → `my-app.fasttunnel.dev`) |
-| `--ui` | | `true` | Enable interactive terminal dashboard |
-| `--no-ui` | | `false` | Disable terminal dashboard and emit raw log lines |
+| Flag          | Short | Default | Description                                                |
+| :------------ | :---- | :------ | :--------------------------------------------------------- |
+| `--port`      | `-p`  | `8080`  | Local port to forward traffic to                           |
+| `--subdomain` | `-s`  | random  | Vanity subdomain (e.g. `my-app` → `my-app.fasttunnel.dev`) |
+| `--ui`        |       | `true`  | Enable interactive terminal dashboard                      |
+| `--no-ui`     |       | `false` | Disable terminal dashboard and emit raw log lines          |
 
 The dashboard is used only when standard input and output are attached to a terminal. Piped output, CI runners, and service managers automatically receive plain logs.
 
 ### Diagnostics Options
 
-| Flag | Default | Description |
-| :--- | :--- | :--- |
-| `--memstats` | `false` | Emit periodic runtime memory snapshots |
-| `--memstats-interval` | `15s` | Set the memory snapshot interval |
-| `--pprof-addr` | disabled | Serve Go pprof endpoints on a local address |
-| `--cpu-profile` | disabled | Write a CPU profile for the tunnel lifetime |
-| `--heap-profile` | disabled | Write a heap profile when the CLI exits |
+| Flag                  | Default  | Description                                 |
+| :-------------------- | :------- | :------------------------------------------ |
+| `--memstats`          | `false`  | Emit periodic runtime memory snapshots      |
+| `--memstats-interval` | `15s`    | Set the memory snapshot interval            |
+| `--pprof-addr`        | disabled | Serve Go pprof endpoints on a local address |
+| `--cpu-profile`       | disabled | Write a CPU profile for the tunnel lifetime |
+| `--heap-profile`      | disabled | Write a heap profile when the CLI exits     |
 
 ### Login Options
 
-| Flag | Short | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `--device` | `-d` | `false` | Use RFC 8628 headless device code flow (no local browser required) |
-| `--callback-port` | `-c` | `0` (auto) | Local port for OAuth PKCE browser redirect callback |
+| Flag              | Short | Default    | Description                                                        |
+| :---------------- | :---- | :--------- | :----------------------------------------------------------------- |
+| `--device`        | `-d`  | `false`    | Use RFC 8628 headless device code flow (no local browser required) |
+| `--callback-port` | `-c`  | `0` (auto) | Local port for OAuth PKCE browser redirect callback                |
 
 ### Diagnostics & Profiling
 
@@ -227,16 +227,16 @@ fasttunnel completion fish > ~/.config/fish/completions/fasttunnel.fish
 
 Credentials and settings are stored under `~/.fasttunnel/`:
 
-| File | Purpose |
-| :--- | :--- |
-| `~/.fasttunnel/config.json` | Stores long-lived auth token (`ft_sk_...`) and CLI preferences |
-| `~/.fasttunnel/credentials.json` | Stores active short-lived JWT access token |
+| File                             | Purpose                                                        |
+| :------------------------------- | :------------------------------------------------------------- |
+| `~/.fasttunnel/config.json`      | Stores long-lived auth token (`ft_sk_...`) and CLI preferences |
+| `~/.fasttunnel/credentials.json` | Stores active short-lived JWT access token                     |
 
 ---
 
 ## Build From Source
 
-Requires **Go 1.22+**:
+Requires **Go 1.24+**:
 
 ```sh
 git clone https://github.com/fasttunnels/fasttunnel.git
