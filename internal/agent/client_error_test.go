@@ -61,3 +61,30 @@ func TestBuildAPIErrorRespectsSilentTunnelNotFound(t *testing.T) {
 		t.Fatal("expected silent API error for tunnel cleanup not found")
 	}
 }
+
+func TestBuildAPIErrorExplainsDeletedLeaseRace(t *testing.T) {
+	raw := []byte(`{"detail":"Tunnel has been deleted","code":"TUNNEL_DELETED","status_code":400}`)
+
+	apiErr := buildAPIError(http.MethodPost, "/api/v1/sessions/lease", http.StatusBadRequest, raw)
+	if apiErr == nil {
+		t.Fatal("expected API error")
+	}
+	if apiErr.UserMsg != "Tunnel was already closed. Try running the command again." {
+		t.Fatalf("expected deleted lease guidance, got %q", apiErr.UserMsg)
+	}
+}
+
+func TestBuildAPIErrorDeviceAuthorizationPending(t *testing.T) {
+	raw := []byte(`{"code":"authorization_pending","detail":"Authorization pending"}`)
+
+	apiErr := buildAPIError(http.MethodPost, "/api/v1/auth/device/token", http.StatusBadRequest, raw)
+	if apiErr == nil {
+		t.Fatal("expected API error")
+	}
+	if apiErr.Code != "authorization_pending" {
+		t.Fatalf("expected code authorization_pending, got %q", apiErr.Code)
+	}
+	if apiErr.Detail != "Authorization pending" {
+		t.Fatalf("expected detail 'Authorization pending', got %q", apiErr.Detail)
+	}
+}

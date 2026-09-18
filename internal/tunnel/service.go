@@ -31,9 +31,16 @@ func New(client *agent.Client) *Service {
 	return &Service{client: client}
 }
 
-// Cleanup deletes the tunnel on the control plane, triggering a cascade that
-// marks the active session as disconnected and releases the subdomain.
-// Should be deferred immediately after CreateAndRegister returns successfully.
+// Client returns the underlying agent.Client for callers that need direct
+// access (e.g., to exchange an auth token for a fresh access JWT).
+func (s *Service) Client() *agent.Client {
+	return s.client
+}
+
+// Cleanup releases an ephemeral tunnel on the control plane, triggering a
+// cascade that marks the active session as disconnected and releases the
+// generated subdomain. Do not call this for user-requested vanity subdomains;
+// those reservations are meant to survive across CLI runs.
 func (s *Service) Cleanup(tunnelID, accessToken string) error {
 	return s.client.DeleteTunnel(tunnelID, accessToken)
 }

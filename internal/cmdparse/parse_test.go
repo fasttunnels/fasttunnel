@@ -84,3 +84,35 @@ func TestParseTunnelDiagnosticsFlags(t *testing.T) {
 		t.Fatalf("HeapProfilePath = %q, want /tmp/fasttunnel.heap.pprof", parsed.Tunnel.HeapProfilePath)
 	}
 }
+
+func TestParseLoginDeviceFlags(t *testing.T) {
+	// Standard login
+	parsed, err := Parse([]string{"login"})
+	if err != nil {
+		t.Fatalf("Parse(login) error: %v", err)
+	}
+	if parsed.Name != CmdLogin {
+		t.Fatalf("Name = %q, want %q", parsed.Name, CmdLogin)
+	}
+	if parsed.Login.Device {
+		t.Fatalf("Login.Device = true, want false")
+	}
+
+	// Login with --device
+	parsedDevice, err := Parse([]string{"login", "--device"})
+	if err != nil {
+		t.Fatalf("Parse(login --device) error: %v", err)
+	}
+	if !parsedDevice.Login.Device {
+		t.Fatalf("Login.Device = false, want true")
+	}
+
+	// Login with -d
+	parsedShort, err := Parse([]string{"login", "-d"})
+	if err != nil {
+		t.Fatalf("Parse(login -d) error: %v", err)
+	}
+	if !parsedShort.Login.Device {
+		t.Fatalf("Login.Device = false, want true")
+	}
+}

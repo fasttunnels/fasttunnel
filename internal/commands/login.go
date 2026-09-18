@@ -5,7 +5,9 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/fasttunnels/fasttunnel/internal/agent"
@@ -19,7 +21,13 @@ import (
 
 // RunLogin handles the login subcommand.
 //
-// It runs the OAuth 2.0 Authorization Code + PKCE flow:
+// Silent path: if ~/.fasttunnel/config.json holds an auth token, it is
+// exchanged for a short-lived access JWT — no browser required.
+//
+// Device path: runs the RFC 8628 headless device code flow when
+// --device or -d is passed.
+//
+// Browser path (default fallback): runs the standard OAuth 2.0 PKCE flow:
 //  1. Generate code_verifier, code_challenge (S256), anti-CSRF state.
 //  2. Start a temporary local callback server.
 //  3. Call /auth/cli/init → receive login_url.
@@ -30,6 +38,28 @@ import (
 //
 // parsed is pre-resolved by cmdparse — no flag handling here.
 func RunLogin(client *agent.Client, parsed cmdparse.Login) error {
+	// ── Device path: RFC 8628 headless code flow ─────────────────────────────
+	if parsed.Device {
+		return runDeviceLogin(client)
+	}
+
+	// ── Silent path: auth token configured — skip browser entirely ────────────
+	authCfg, _ := config.LoadAuthConfig()
+	if authCfg.AuthToken != "" {
+		resp, err := client.ExchangeAuthToken(authCfg.AuthToken)
+		if err == nil {
+			if saveErr := config.SaveAuth(config.AuthState{AccessToken: resp.AccessToken}); saveErr != nil {
+				return fmt.Errorf("save credentials: %w", saveErr)
+			}
+			telemetry.LogInfo("Authenticated via auth token.")
+			return nil
+		}
+		// Exchange failed (revoked or expired) — fall through to browser login
+		telemetry.LogInfo("Auth token invalid or revoked — falling back to browser login…")
+	}
+
+	// ── PKCE browser flow ─────────────────────────────────────────────────────
+
 	// 1. PKCE parameters.
 	verifier, err := auth.GenerateVerifier()
 	if err != nil {
@@ -87,4 +117,92 @@ func RunLogin(client *agent.Client, parsed cmdparse.Login) error {
 
 	telemetry.LogInfo("Logged in successfully.")
 	return nil
+}
+
+// runDeviceLogin implements the RFC 8628 OAuth 2.0 Device Authorization Grant.
+// Used for headless systems where automatic browser launch is impossible.
+func runDeviceLogin(client *agent.Client) error {
+	deviceCodeResp, err := client.RequestDeviceCode()
+	if err != nil {
+		return fmt.Errorf("request device code: %w", err)
+	}
+
+	telemetry.LogInfo("\nTo authenticate FastTunnel CLI on this device:")
+	telemetry.LogInfo(fmt.Sprintf("  1. Visit:      %s", deviceCodeResp.VerificationURI))
+	telemetry.LogInfo(fmt.Sprintf("  2. Enter code: %s\n", deviceCodeResp.UserCode))
+	telemetry.LogInfo(fmt.Sprintf("Direct link:\n  %s\n", deviceCodeResp.VerificationURIComplete))
+	telemetry.LogInfo("Waiting for authorization (press Ctrl+C to cancel)...")
+
+	interval := time.Duration(deviceCodeResp.Interval) * time.Second
+	if interval <= 0 {
+		interval = 5 * time.Second
+	}
+	expiresIn := time.Duration(deviceCodeResp.ExpiresIn) * time.Second
+	if expiresIn <= 0 {
+		expiresIn = 15 * time.Minute
+	}
+	deadline := time.Now().Add(expiresIn)
+
+	networkFailures := 0
+	for {
+		time.Sleep(interval)
+		if time.Now().After(deadline) {
+			return fmt.Errorf("device login timed out; please try again")
+		}
+
+		tokens, err := client.PollDeviceToken(deviceCodeResp.DeviceCode)
+		if err == nil {
+			if saveErr := config.SaveAuth(config.AuthState{AccessToken: tokens.AccessToken}); saveErr != nil {
+				return fmt.Errorf("save auth credentials: %w", saveErr)
+			}
+			telemetry.LogInfo("\n✓ Successfully authenticated! Credentials saved.")
+			return nil
+		}
+
+		var apiErr *telemetry.APIError
+		if errors.As(err, &apiErr) {
+			networkFailures = 0
+			switch apiErr.Code {
+			case "authorization_pending":
+				continue
+			case "slow_down":
+				interval += 5 * time.Second
+				continue
+			case "expired_token":
+				return fmt.Errorf("device code expired; please run `fasttunnel login --device` again")
+			case "access_denied":
+				return fmt.Errorf("login request was denied by user")
+			}
+			if strings.EqualFold(apiErr.Detail, "authorization pending") || strings.EqualFold(apiErr.UserMsg, "authorization pending") {
+				continue
+			}
+		}
+
+		errLower := strings.ToLower(err.Error())
+		if strings.Contains(errLower, "authorization_pending") || strings.Contains(errLower, "authorization pending") {
+			networkFailures = 0
+			continue
+		}
+		if strings.Contains(errLower, "slow_down") {
+			networkFailures = 0
+			interval += 5 * time.Second
+			continue
+		}
+		if strings.Contains(errLower, "expired_token") || strings.Contains(errLower, "expired") {
+			return fmt.Errorf("device code expired; please run `fasttunnel login --device` again")
+		}
+		if strings.Contains(errLower, "access_denied") || strings.Contains(errLower, "denied") {
+			return fmt.Errorf("login request was denied by user")
+		}
+
+		// Handle transient network hiccups (e.g. connection reset, EOF, timeout) during the 15-minute polling window
+		if strings.Contains(errLower, "connection reset") || strings.Contains(errLower, "eof") || strings.Contains(errLower, "connection refused") || strings.Contains(errLower, "timeout") {
+			networkFailures++
+			if networkFailures <= 5 {
+				continue
+			}
+		}
+
+		return fmt.Errorf("device authentication failed: %w", err)
+	}
 }

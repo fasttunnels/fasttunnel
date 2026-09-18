@@ -29,6 +29,7 @@ const (
 	CmdHTTP       CommandName = "http"
 	CmdHTTPS      CommandName = "https"
 	CmdLogin      CommandName = "login"
+	CmdConfigure  CommandName = "configure"
 	CmdCompletion CommandName = "completion"
 	CmdVersion    CommandName = "version"
 )
@@ -43,6 +44,9 @@ type Parsed struct {
 
 	// Login is populated when Name is CmdLogin.
 	Login Login
+
+	// Configure is populated when Name is CmdConfigure.
+	Configure Configure
 
 	// Completion is populated when Name is CmdCompletion.
 	Completion Completion
@@ -84,9 +88,18 @@ type Login struct {
 	// CallbackPort is the ephemeral local HTTP server port used for the
 	// OAuth 2.0 PKCE redirect.  Defaults to 0 (OS-assigned free port).
 	CallbackPort int
+
+	// Device enables the RFC 8628 headless device code flow.
+	Device bool
 }
 
 // Completion holds the shell target for completion script generation.
 type Completion struct {
 	Shell string
+}
+
+// Configure holds the auth token passed to `fasttunnel configure <token>`.
+type Configure struct {
+	// AuthToken is the personal access token (ft_sk_...) to store.
+	AuthToken string
 }

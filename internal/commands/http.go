@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -22,28 +23,51 @@ import (
 
 // RunHTTP handles the http and https subcommands.
 //
-// args is pre-parsed by cmdparse — no flag handling here.
+// If the access token has expired (401) and an auth token is present in
+// config.json, the CLI silently re-exchanges it for a fresh JWT and retries
+// the failing operation once.  If no auth token is configured, a helpful
+// error message is printed and the command exits non-zero.
+//
+// parsed is pre-parsed by cmdparse — no flag handling here.
 func RunHTTP(svc *tunnel.Service, parsed cmdparse.Tunnel) error {
 	authState, err := config.LoadAuth()
 	if err != nil {
-		return fmt.Errorf("not logged in...\n\nRun: fasttunnel login")
+		return fmt.Errorf("not logged in\n\nRun: fasttunnel login  OR  fasttunnel configure <auth_token>")
 	}
 
-	lease, err := svc.CreateAndRegister(parsed.Subdomain, parsed.Protocol, parsed.Port, authState.AccessToken)
+	accessToken := authState.AccessToken
+
+	lease, err := svc.CreateAndRegister(parsed.Subdomain, parsed.Protocol, parsed.Port, accessToken)
 	if err != nil {
-		return err
+		// Attempt silent refresh if the JWT expired
+		refreshed, refreshErr := silentRefresh(svc.Client(), err)
+		if refreshErr != nil {
+			return refreshErr
+		}
+		if refreshed != "" {
+			accessToken = refreshed
+			lease, err = svc.CreateAndRegister(parsed.Subdomain, parsed.Protocol, parsed.Port, accessToken)
+			if err != nil {
+				return err
+			}
+		} else {
+			return err
+		}
 	}
 
-	// Graceful cleanup: delete the tunnel (and cascade-disconnect the session)
-	// when the CLI exits normally. For hard kills (SIGKILL) the edge handles
-	// session cleanup independently via NotifyDisconnect.
-	defer func() {
-		if err := svc.Cleanup(lease.TunnelID, authState.AccessToken); err != nil {
-			// Silently ignore errors on cleanup
-			// TODO: Clean up with edge secret if client error (e.g. invalid token) since auth state may be stale
-			telemetry.SilentLogProdError(err)
-		}
-	}()
+	// Graceful cleanup: random domains are ephemeral and can be released when
+	// the CLI exits. Explicit vanity domains are preserved for the user, which
+	// avoids stale shutdown cleanup deleting a domain that a new CLI run just
+	// reactivated.
+	if strings.TrimSpace(parsed.Subdomain) == "" {
+		defer func() {
+			if err := svc.Cleanup(lease.TunnelID, accessToken); err != nil {
+				// Silently ignore errors on cleanup
+				// TODO: Clean up with edge secret if client error (e.g. invalid token) since auth state may be stale
+				telemetry.SilentLogProdError(err)
+			}
+		}()
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -109,6 +133,49 @@ func RunHTTP(svc *tunnel.Service, parsed cmdparse.Tunnel) error {
 	}
 	telemetry.LogInfo("\nTunnel closed.")
 	return nil
+}
+
+// silentRefresh attempts to exchange the stored auth token for a fresh access
+// JWT when the original request failed with a token-expired error.
+//
+// Returns (newToken, nil) on success, ("", nil) if the error is not
+// token-expiry-related (so the caller can propagate the original error), or
+// ("", err) if the exchange itself failed.
+func silentRefresh(client *agent.Client, originalErr error) (string, error) {
+	if !isHTTPUnauthorized(originalErr) {
+		return "", nil
+	}
+
+	authCfg, _ := config.LoadAuthConfig() // load the current auth configuration
+	if authCfg.AuthToken == "" {
+		return "", fmt.Errorf(
+			"session expired\n\nRun: fasttunnel login  OR  fasttunnel configure <auth_token>",
+		)
+	}
+
+	telemetry.LogInfo("Access token expired — refreshing via auth token…")
+	resp, err := client.ExchangeAuthToken(authCfg.AuthToken)
+	if err != nil {
+		return "", fmt.Errorf(
+			"auth token invalid or revoked\n\nGenerate a new token at: https://app.fasttunnel.dev/cli-access\nThen run: fasttunnel configure <new_token>",
+		)
+	}
+
+	if saveErr := config.SaveAuth(config.AuthState{AccessToken: resp.AccessToken}); saveErr != nil {
+		telemetry.SilentLogProdError(saveErr) // non-fatal — continue with the new token in-memory
+	}
+
+	telemetry.LogInfo("Refreshed successfully.")
+	return resp.AccessToken, nil
+}
+
+// isHTTPUnauthorized returns true when err is an APIError with HTTP status 401.
+func isHTTPUnauthorized(err error) bool {
+	var apiErr *telemetry.APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	return apiErr.StatusCode == 401
 }
 
 func startTunnelDiagnostics(ctx context.Context, parsed cmdparse.Tunnel, observer agent.EventObserver) (*diagnostics.Session, error) {

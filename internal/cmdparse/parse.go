@@ -54,6 +54,13 @@ func Parse(args []string) (Parsed, error) {
 			return Parsed{}, err
 		}
 		return Parsed{Name: CmdLogin, Login: l}, nil
+
+	case "configure":
+		c, err := ParseConfigure(args[1:])
+		if err != nil {
+			return Parsed{}, err
+		}
+		return Parsed{Name: CmdConfigure, Configure: c}, nil
 	}
 
 	// ── Slow path: scan for --protocol / -P without flag.FlagSet ──────────
@@ -85,14 +92,14 @@ func Parse(args []string) (Parsed, error) {
 // removed, and whether the flag was found.
 func extractProtocol(args []string) (value string, rest []string, found bool) {
 	rest = make([]string, 0, len(args))
-	for i := 0; i < len(args); i++ {
+	for i := range args {
 		a := args[i]
 		// --protocol=value  or  -P=value
-		if strings.HasPrefix(a, "--protocol=") {
-			return strings.TrimPrefix(a, "--protocol="), append(rest, args[i+1:]...), true
+		if after, ok := strings.CutPrefix(a, "--protocol="); ok {
+			return after, append(rest, args[i+1:]...), true
 		}
-		if strings.HasPrefix(a, "-P=") {
-			return strings.TrimPrefix(a, "-P="), append(rest, args[i+1:]...), true
+		if after, ok := strings.CutPrefix(a, "-P="); ok {
+			return after, append(rest, args[i+1:]...), true
 		}
 		// --protocol value  or  -P value
 		if (a == "--protocol" || a == "-P") && i+1 < len(args) {
@@ -108,15 +115,18 @@ func extractProtocol(args []string) (value string, rest []string, found bool) {
 func Usage() string {
 	return strings.TrimSpace(`
 usage:
-	fasttunnel http  <port> [-s subdomain] [--ui|--no-ui] [diagnostics flags]
-	fasttunnel https <port> [-s subdomain] [--ui|--no-ui] [diagnostics flags]
+	fasttunnel http  <port> [-s <subdomain>] [--ui|--no-ui] [diagnostics flags]
+	fasttunnel https <port> [-s <subdomain>] [--ui|--no-ui] [diagnostics flags]
 	fasttunnel http  -p <port> [-s <subdomain>] [--ui|--no-ui] [diagnostics flags]
 	fasttunnel https --port <port> [--subdomain <subdomain>] [--ui|--no-ui] [diagnostics flags]
 	fasttunnel --protocol http  --port <port> [--subdomain <subdomain>] [--ui|--no-ui] [diagnostics flags]
 	fasttunnel --protocol https -p <port> [-s <subdomain>] [--ui|--no-ui] [diagnostics flags]
-  fasttunnel login [-c <callback-port>]
+
+commands:
+	fasttunnel login [--device|-d] [-c <callback-port>]
+	fasttunnel configure <auth-token>
 	fasttunnel completion <zsh|bash|fish>
-  fasttunnel version
+	fasttunnel version
 
 diagnostics flags:
 	--memstats [--memstats-interval 15s]
