@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>CLI Authenticated · FastTunnel</title>
+    <style>
+      :root {
+        --color-primary: #b86e9f;
+        --color-accent: #e0822d;
+        --color-success: #7fba7a;
+        --color-success-soft: rgba(127, 186, 122, 0.15);
+        --bg-base: #0a0809;
+        --bg-surface: rgba(15, 9, 12, 0.84);
+        --border-subtle: rgba(255, 255, 255, 0.1);
+        --border-default: rgba(184, 110, 159, 0.4);
+        --text-primary: #ffffff;
+        --text-secondary: rgba(255, 255, 255, 0.72);
+        --text-muted: rgba(255, 255, 255, 0.48);
+        --radius-xl: 16px;
+        --radius-full: 9999px;
+        --shadow-glow:
+          0 0 48px rgba(127, 186, 122, 0.18), 0 0 80px rgba(184, 110, 159, 0.12);
+        --font-sans:
+          -apple-system, BlinkMacSystemFont, Inter, "Segoe UI", Roboto,
+          "Helvetica Neue", Arial, sans-serif;
+        --font-mono:
+          "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: var(--font-sans);
+        background:
+          radial-gradient(
+            1000px 600px at 20% -10%,
+            rgba(127, 186, 122, 0.22),
+            transparent 55%
+          ),
+          radial-gradient(
+            900px 500px at 100% 0%,
+            rgba(224, 130, 45, 0.18),
+            transparent 60%
+          ),
+          var(--bg-base);
+        color: var(--text-primary);
+        display: grid;
+        place-items: center;
+        padding: 24px;
+      }
+
+      .card {
+        width: min(640px, 100%);
+        background: var(--bg-surface);
+        border: 1px solid var(--border-subtle);
+        border-radius: 28px;
+        box-shadow: var(--shadow-glow);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        padding: 40px 36px;
+        text-align: center;
+      }
+
+      .icon-container {
+        width: 64px;
+        height: 64px;
+        border-radius: 20px;
+        background: var(--color-success-soft);
+        border: 1px solid rgba(127, 186, 122, 0.35);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        margin-bottom: 20px;
+        animation: pulse 2.4s ease-in-out infinite;
+      }
+
+      @keyframes pulse {
+        0%,
+        100% {
+          box-shadow: 0 0 0 0 rgba(127, 186, 122, 0.3);
+        }
+
+        50% {
+          box-shadow: 0 0 0 12px rgba(127, 186, 122, 0);
+        }
+      }
+
+      .icon-container svg {
+        width: 32px;
+        height: 32px;
+        stroke: var(--color-success);
+      }
+
+      .badge {
+        display: inline-block;
+        padding: 6px 14px;
+        border-radius: var(--radius-full);
+        border: 1px solid rgba(127, 186, 122, 0.4);
+        background: rgba(127, 186, 122, 0.08);
+        color: var(--color-success);
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+        margin-bottom: 16px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(28px, 5vw, 40px);
+        line-height: 1.15;
+        letter-spacing: -0.02em;
+        font-weight: 700;
+      }
+
+      .gradient {
+        background: linear-gradient(
+          135deg,
+          #ffffff 30%,
+          var(--color-success) 100%
+        );
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
+      }
+
+      p {
+        margin: 14px auto 0;
+        color: var(--text-secondary);
+        font-size: 15px;
+        line-height: 1.6;
+        max-width: 52ch;
+      }
+
+      .terminal {
+        margin: 28px auto 0;
+        border: 1px solid var(--border-subtle);
+        border-radius: var(--radius-xl);
+        overflow: hidden;
+        background: rgba(10, 8, 9, 0.85);
+        text-align: left;
+      }
+
+      .terminal-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 14px;
+        border-bottom: 1px solid var(--border-subtle);
+      }
+
+      .dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+      }
+
+      .dot.red {
+        background: #ef4444;
+      }
+
+      .dot.yellow {
+        background: #f59e0b;
+      }
+
+      .dot.green {
+        background: #7fba7a;
+      }
+
+      pre {
+        margin: 0;
+        padding: 16px 14px;
+        font-family: var(--font-mono);
+        font-size: 13px;
+        line-height: 1.5;
+        color: #e5e5e5;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .line-success {
+        color: var(--color-success);
+        font-weight: 500;
+      }
+
+      .meta {
+        margin-top: 22px;
+        color: var(--text-muted);
+        font-size: 13px;
+      }
+
+      .actions {
+        display: flex;
+        gap: 12px;
+        justify-content: center;
+        flex-wrap: wrap;
+        margin-top: 26px;
+      }
+
+      .btn {
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 40px;
+        padding: 0 20px;
+        border-radius: 12px;
+        font-weight: 600;
+        font-size: 14px;
+        cursor: pointer;
+        transition:
+          transform 160ms ease,
+          opacity 160ms ease,
+          border-color 160ms ease;
+      }
+
+      .btn:hover {
+        transform: translateY(-1px);
+      }
+
+      .btn-primary {
+        color: #fff;
+        background: linear-gradient(90deg, #e0822d, var(--color-primary));
+        border: 1px solid transparent;
+      }
+
+      .btn-secondary {
+        color: var(--text-primary);
+        border: 1px solid var(--border-subtle);
+        background: rgba(255, 255, 255, 0.05);
+      }
+    </style>
+  </head>
+
+  <body>
+    <main class="card">
+      <div class="icon-container">
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke-width="2.5"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <polyline points="20 6 9 17 4 12"></polyline>
+        </svg>
+      </div>
+
+      <span class="badge">Authenticated</span>
+      <h1><span class="gradient">FastTunnel CLI Linked</span></h1>
+      <p>
+        Your terminal session has been authenticated successfully. You can now
+        safely close this browser window and return to your CLI.
+      </p>
+
+      <div class="terminal">
+        <div class="terminal-head">
+          <span class="dot red"></span>
+          <span class="dot yellow"></span>
+          <span class="dot green"></span>
+        </div>
+        <pre><code>$ fasttunnel login
+<span class="line-success">&#10003; Logged in successfully.</span>
+Start a tunnel: fasttunnel http 3000</code></pre>
+      </div>
+
+      <div class="actions">
+        <button class="btn btn-secondary" onclick="window.close()">
+          Close Window
+        </button>
+      </div>
+
+      <p class="meta">
+        Return to your terminal window to continue using FastTunnel.
+      </p>
+    </main>
+  </body>
+</html>

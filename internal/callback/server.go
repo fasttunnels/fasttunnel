@@ -7,11 +7,15 @@ package callback
 
 import (
 	"context"
+	_ "embed"
 	"fmt"
 	"net"
 	"net/http"
 	"time"
 )
+
+//go:embed success.html
+var successHTML []byte
 
 // Result holds the code and validated state received from the OAuth callback.
 type Result struct {
@@ -65,14 +69,7 @@ func Start(port int, expectedState string) (*Server, error) {
 		}
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write([]byte(
-			`<html><head><title>fasttunnel login</title></head>` +
-				`<body style="font-family:system-ui;padding:40px;text-align:center">` +
-				`<h2>&#10003; Login successful</h2>` +
-				`<p>Your fasttunnel CLI is now authenticated.</p>` +
-				`<p>You can close this tab and return to your terminal.</p>` +
-				`</body></html>`,
-		))
+		_, _ = w.Write(successHTML)
 	})
 
 	srv := &http.Server{Handler: mux}
