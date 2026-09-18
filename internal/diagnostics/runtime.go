@@ -34,12 +34,12 @@ type MemorySnapshot struct {
 type Observer func(MemorySnapshot)
 
 type Session struct {
-	cfg        Config
-	cancel     context.CancelFunc
+	cfg         Config
+	cancel      context.CancelFunc
 	monitorDone chan struct{}
-	server     *http.Server
-	serverDone chan error
-	cpuFile    *os.File
+	server      *http.Server
+	serverDone  chan error
+	cpuFile     *os.File
 }
 
 func Start(ctx context.Context, cfg Config, observer Observer) (*Session, error) {

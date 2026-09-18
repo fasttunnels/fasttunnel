@@ -61,6 +61,11 @@ func run() int {
 			logCommandError(err)
 			return 1
 		}
+	case cmdparse.CmdConfigure:
+		if err := commands.RunConfigure(client, parsed.Configure); err != nil {
+			logCommandError(err)
+			return 1
+		}
 	case cmdparse.CmdHTTP, cmdparse.CmdHTTPS:
 		if err := commands.RunHTTP(svc, parsed.Tunnel); err != nil {
 			logCommandError(err)

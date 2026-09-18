@@ -33,6 +33,26 @@ type CliTokenResponse struct {
 	TokenType    string `json:"token_type"`
 }
 
+// DeviceCodeResponse is returned by POST /api/v1/auth/device/code.
+type DeviceCodeResponse struct {
+	DeviceCode              string `json:"device_code"`
+	UserCode                string `json:"user_code"`
+	VerificationURI         string `json:"verification_uri"`
+	VerificationURIComplete string `json:"verification_uri_complete"`
+	ExpiresIn               int    `json:"expires_in"`
+	Interval                int    `json:"interval"`
+}
+
+// ── Auth token (PAT) exchange ──────────────────────────────────────────────────
+
+// TokenExchangeResponse is returned by POST /auth/token-exchange.
+type TokenExchangeResponse struct {
+	AccessToken string `json:"access_token"`
+	TokenType   string `json:"token_type"`
+	ExpiresIn   int    `json:"expires_in"`
+	Email       string `json:"email,omitempty"`
+}
+
 // ── Tunnel / session responses ─────────────────────────────────────────────────
 
 type CreateTunnelResponse struct {
@@ -65,6 +85,20 @@ func NewClient(version string) *Client {
 
 // ── Auth methods ───────────────────────────────────────────────────────────────
 
+// ExchangeAuthToken exchanges a personal access token (ft_sk_...) for a
+// short-lived JWT access token. Used by `fasttunnel configure` and the silent
+// re-auth path in `fasttunnel login` and `fasttunnel http`.
+func (c *Client) ExchangeAuthToken(authToken string) (TokenExchangeResponse, error) {
+	payload := map[string]any{
+		"auth_token": authToken,
+	}
+	var resp TokenExchangeResponse
+	if err := c.postJSON(c.controlURL("/api/v1/tokens/token-exchange"), payload, "", &resp); err != nil {
+		return TokenExchangeResponse{}, err
+	}
+	return resp, nil
+}
+
 // InitLogin creates a PKCE login intent on the control plane.
 // codeChallenge is the S256 hash of the code verifier.
 // state is a random anti-CSRF token.
@@ -92,6 +126,28 @@ func (c *Client) ExchangeCliToken(code, codeVerifier, redirectURI string) (CliTo
 	}
 	var resp CliTokenResponse
 	if err := c.postJSON(c.controlURL("/api/v1/auth/cli/token"), payload, "", &resp); err != nil {
+		return CliTokenResponse{}, err
+	}
+	return resp, nil
+}
+
+// RequestDeviceCode initiates the RFC 8628 device flow on the control plane.
+func (c *Client) RequestDeviceCode() (DeviceCodeResponse, error) {
+	var resp DeviceCodeResponse
+	if err := c.postJSON(c.controlURL("/api/v1/auth/device/code"), map[string]any{}, "", &resp); err != nil {
+		return DeviceCodeResponse{}, err
+	}
+	return resp, nil
+}
+
+// PollDeviceToken polls the control plane with the device_code to retrieve tokens.
+func (c *Client) PollDeviceToken(deviceCode string) (CliTokenResponse, error) {
+	payload := map[string]any{
+		"device_code": deviceCode,
+		"grant_type":  "urn:ietf:params:oauth:grant-type:device_code",
+	}
+	var resp CliTokenResponse
+	if err := c.postJSON(c.controlURL("/api/v1/auth/device/token"), payload, "", &resp); err != nil {
 		return CliTokenResponse{}, err
 	}
 	return resp, nil
@@ -306,7 +362,7 @@ func mapAPIUserMessage(endpoint, code string, statusCode int, detail string) (st
 		case "TUNNEL_OWNERSHIP_DENIED":
 			return "Nice try..", "", false
 		case "TUNNEL_DELETED":
-			return "Tunnel not found", "", false
+			return "Tunnel was already closed. Try running the command again.", "", false
 		}
 
 	case "/api/v1/tunnels/{tunnelId}":

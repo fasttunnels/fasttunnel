@@ -38,12 +38,19 @@ type AuthState struct {
 	AccessToken string `json:"access_token"`
 }
 
+// AuthConfig holds long-lived credentials persisted to ~/.fasttunnel/config.json.
+// Unlike credentials.json (short-lived JWT), this file stores the personal
+// access token used to silently re-issue access tokens without browser login.
+type AuthConfig struct {
+	AuthToken string `json:"auth_token,omitempty"`
+}
+
 // Load resolves a Config from environment variables, falling back to the
 // production defaults baked in at build time via ldflags.
 func Load() Config {
 	return Config{
-		ControlPlaneURL: envOr("FASTTUNNEL_CONTROL_URL", DefaultControlPlaneURL),
-		EdgeURL:         envOr("FASTTUNNEL_EDGE_URL", DefaultEdgeURL),
+		ControlPlaneURL: DefaultControlPlaneURL,
+		EdgeURL:         DefaultEdgeURL,
 	}
 }
 
@@ -88,6 +95,62 @@ func SaveAuth(state AuthState) error {
 		return fmt.Errorf("failed to write auth state: %w", err)
 	}
 	return nil
+}
+
+// ── AuthConfig (long-lived token) persistence ─────────────────────────────────
+
+func authConfigFilePath() (string, error) {
+	if cfgDir := os.Getenv("FASTTUNNEL_CONFIG_DIR"); cfgDir != "" {
+		return filepath.Join(cfgDir, "config.json"), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve home dir: %w", err)
+	}
+	return filepath.Join(home, ".fasttunnel", "config.json"), nil
+}
+
+// SaveAuthConfig writes the auth token to ~/.fasttunnel/config.json (mode 0600).
+func SaveAuthConfig(cfg AuthConfig) error {
+	path, err := authConfigFilePath()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("failed to create config directory: %w", err)
+	}
+	payload, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to encode auth config: %w", err)
+	}
+	return os.WriteFile(path, payload, 0o600)
+}
+
+// LoadAuthConfig reads and decodes the auth config. Returns empty AuthConfig
+// (no error) if the file does not exist — callers check AuthConfig.HasToken().
+func LoadAuthConfig() (AuthConfig, error) {
+	path, err := authConfigFilePath()
+	if err != nil {
+		return AuthConfig{}, err
+	}
+	payload, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return AuthConfig{}, nil
+	}
+	if err != nil {
+		return AuthConfig{}, err
+	}
+	var cfg AuthConfig
+	if err := json.Unmarshal(payload, &cfg); err != nil {
+		return AuthConfig{}, fmt.Errorf("failed to decode auth config: %w", err)
+	}
+	return cfg, nil
+}
+
+// HasAuthToken returns true when an auth token is stored in config.json.
+func HasAuthToken() bool {
+	cfg, err := LoadAuthConfig()
+	return err == nil && cfg.AuthToken != ""
 }
 
 // LoadAuth reads and decodes the persisted auth state.

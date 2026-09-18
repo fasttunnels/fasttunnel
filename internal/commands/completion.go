@@ -10,7 +10,7 @@ _fasttunnel()
     local cur prev words cword
     _init_completion || return
 
-    local commands="http https login completion version"
+    local commands="http https login configure completion version"
 
     case "${prev}" in
         completion)
@@ -42,7 +42,10 @@ _fasttunnel()
         COMPREPLY=( $(compgen -W "-p --port -s --subdomain --ui --no-ui" -- "${cur}") )
             ;;
         login)
-            COMPREPLY=( $(compgen -W "-c --callback-port" -- "${cur}") )
+            COMPREPLY=( $(compgen -W "-c --callback-port -d --device" -- "${cur}") )
+            ;;
+        configure)
+            COMPREPLY=()
             ;;
         completion)
             COMPREPLY=( $(compgen -W "zsh bash fish" -- "${cur}") )
@@ -63,6 +66,7 @@ _fasttunnel() {
     'http:Expose local HTTP app'
     'https:Expose local HTTPS app'
     'login:Authenticate CLI'
+    'configure:Save personal access token'
     'completion:Print shell completion script'
     'version:Show version info'
   )
@@ -83,7 +87,12 @@ _fasttunnel() {
       ;;
     login)
       _arguments \
-        '(-c --callback-port)'{-c,--callback-port}'[callback port]:port:'
+        '(-c --callback-port)'{-c,--callback-port}'[callback port]:port:' \
+        '(-d --device)'{-d,--device}'[headless device code flow]'
+      ;;
+    configure)
+      _arguments \
+        '1:auth_token:'
       ;;
     completion)
       _values 'shell' zsh bash fish
@@ -105,6 +114,7 @@ complete -c fasttunnel -f
 complete -c fasttunnel -n "__fish_use_subcommand" -a "http" -d "Expose local HTTP app"
 complete -c fasttunnel -n "__fish_use_subcommand" -a "https" -d "Expose local HTTPS app"
 complete -c fasttunnel -n "__fish_use_subcommand" -a "login" -d "Authenticate CLI"
+complete -c fasttunnel -n "__fish_use_subcommand" -a "configure" -d "Save personal access token"
 complete -c fasttunnel -n "__fish_use_subcommand" -a "completion" -d "Print shell completion script"
 complete -c fasttunnel -n "__fish_use_subcommand" -a "version" -d "Show version info"
 
@@ -113,6 +123,7 @@ complete -c fasttunnel -n "__fish_seen_subcommand_from http https" -s s -l subdo
 complete -c fasttunnel -n "__fish_seen_subcommand_from http https" -l ui -d "Enable interactive dashboard"
 complete -c fasttunnel -n "__fish_seen_subcommand_from http https" -l no-ui -d "Disable interactive dashboard"
 complete -c fasttunnel -n "__fish_seen_subcommand_from login" -s c -l callback-port -d "Callback port"
+complete -c fasttunnel -n "__fish_seen_subcommand_from login" -s d -l device -d "Headless device flow"
 
 complete -c fasttunnel -n "__fish_seen_subcommand_from completion" -a "zsh bash fish" -d "Target shell"
 `
